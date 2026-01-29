@@ -1,0 +1,20 @@
+---
+# Fetch Grafana admin password from Infisical
+
+- name: Fetch Grafana admin password from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get GRAFANA_ADMIN_PASSWORD \
+      --token={{ infisical_service_token }} \
+      --projectId={{ infisical_project_id }} \
+      --env={{ infisical_env_slug }} \
+      --path={{ monitoring_infisical_path }}/grafana/ \
+      --plain 2>/dev/null || echo ""
+  register: grafana_password_result
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Set Grafana admin password fact
+  ansible.builtin.set_fact:
+    grafana_admin_password: "{{ grafana_password_result.stdout | default('admin') }}"
+  no_log: true

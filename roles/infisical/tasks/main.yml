@@ -1,0 +1,65 @@
+---
+- name: Check if Infisical CLI is already installed
+  ansible.builtin.command: which infisical
+  register: infisical_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Infisical CLI repository setup script
+  ansible.builtin.shell: |
+    curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash
+  args:
+    executable: /bin/bash
+    creates: /etc/apt/sources.list.d/infisical.list
+  when: infisical_check.rc != 0
+
+- name: Install Infisical CLI
+  ansible.builtin.apt:
+    name: infisical
+    state: present
+    update_cache: yes
+  when: infisical_check.rc != 0
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Ensure token directory exists
+  ansible.builtin.file:
+    path: "{{ infisical_service_token_path | dirname }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+
+- name: Ensure config directory exists
+  ansible.builtin.file:
+    path: "{{ infisical_config_path | dirname }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Place Infisical service token file if provided
+  when: infisical_service_token is defined and infisical_service_token | length > 0
+  ansible.builtin.copy:
+    dest: "{{ infisical_service_token_path }}"
+    content: "{{ infisical_service_token }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Template Infisical config file
+  ansible.builtin.template:
+    src: config.env.j2
+    dest: "{{ infisical_config_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Template Infisical env wrapper
+  ansible.builtin.template:
+    src: infisical-run.j2
+    dest: /usr/local/bin/infisical-run
+    mode: '0755'
+

@@ -1,0 +1,44 @@
+---
+# Node Exporter Role - Deploy Prometheus node_exporter on all hosts
+# This enables Prometheus to scrape host metrics
+
+- name: Create node_exporter directory
+  ansible.builtin.file:
+    path: /opt/node-exporter
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Template node_exporter docker-compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/node-exporter/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart node exporter
+
+- name: Ensure homelab network exists
+  ansible.builtin.command:
+    cmd: docker network create homelab
+  register: network_create
+  changed_when: network_create.rc == 0
+  failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
+
+- name: Start node_exporter container
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: /opt/node-exporter
+  changed_when: true
+
+- name: Get node_exporter container status
+  ansible.builtin.command:
+    cmd: docker compose ps --format json
+    chdir: /opt/node-exporter
+  register: node_exporter_result
+  changed_when: false
+
+- name: Display node_exporter status
+  ansible.builtin.debug:
+    msg: "Node exporter container started"

@@ -1,0 +1,200 @@
+---
+# Configure Proxmox network bridge to be VLAN-aware
+
+- name: Gather facts about network interfaces
+  ansible.builtin.setup:
+    gather_subset:
+      - network
+
+- name: Check if /etc/network/interfaces exists
+  ansible.builtin.stat:
+    path: /etc/network/interfaces
+  register: network_interfaces_file
+
+- name: Fail if network interfaces file doesn't exist
+  ansible.builtin.fail:
+    msg: "/etc/network/interfaces not found. This role is designed for Debian-based Proxmox hosts."
+  when: not network_interfaces_file.stat.exists
+
+- name: Backup current network configuration
+  ansible.builtin.copy:
+    src: /etc/network/interfaces
+    dest: "/etc/network/interfaces.backup.{{ ansible_date_time.iso8601_basic_short }}"
+    remote_src: true
+    mode: '0644'
+  when: backup_network_config | bool
+
+- name: Read current network configuration
+  ansible.builtin.slurp:
+    path: /etc/network/interfaces
+  register: network_config_content
+
+- name: Decode network configuration
+  ansible.builtin.set_fact:
+    network_config: "{{ network_config_content.content | b64decode }}"
+
+# Multi-bridge mode (new)
+- name: Configure multiple bridges
+  when: proxmox_bridges | length > 0
+  block:
+    - name: Display bridges to configure
+      ansible.builtin.debug:
+        msg: "Configuring {{ proxmox_bridges | length }} bridge(s): {{ proxmox_bridges | map(attribute='name') | list | join(', ') }}"
+
+    - name: Add or update bridge configurations
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item.name }}"
+        block: "{{ lookup('template', 'bridge.j2') }}"
+        state: present
+      loop: "{{ proxmox_bridges }}"
+      register: bridges_configured
+
+    - name: Remove duplicate or malformed managed blocks
+      ansible.builtin.shell: |
+        sed -i '/^+BEGIN ANSIBLE MANAGED BLOCK/d' /etc/network/interfaces
+        sed -i '/^+END ANSIBLE MANAGED BLOCK/d' /etc/network/interfaces
+      when: bridges_configured.changed
+      changed_when: false
+
+    - name: Display warning about network restart
+      ansible.builtin.debug:
+        msg: |
+          Bridge configurations have been updated.
+          IMPORTANT: Network configuration changed but NOT applied yet.
+          To apply changes safely: Access Proxmox console and run 'ifreload -a'
+          Or run with: -e restart_networking=true (may disconnect SSH)
+      when: bridges_configured.changed
+
+    - name: Reload network configuration (if enabled)
+      ansible.builtin.command: ifreload -a
+      when:
+        - restart_networking | bool
+        - bridges_configured.changed
+      register: network_reload
+      changed_when: true
+
+    - name: Enable VLAN filtering on bridges (runtime)
+      ansible.builtin.command: "ip link set {{ item.name }} type bridge vlan_filtering 1"
+      loop: "{{ proxmox_bridges }}"
+      when:
+        - restart_networking | bool
+        - bridges_configured.changed
+        - item.vlan_aware | default(true)
+      failed_when: false
+
+# Legacy single-bridge mode (backwards compatible)
+- name: Configure single VLAN-aware bridge (legacy mode)
+  when: proxmox_bridges | length == 0
+  block:
+    - name: Check if bridge is already VLAN-aware
+      ansible.builtin.set_fact:
+        bridge_is_vlan_aware: "{{ 'bridge-vlan-aware yes' in network_config }}"
+
+    - name: Display current VLAN awareness status
+      ansible.builtin.debug:
+        msg: "Bridge {{ proxmox_bridge_name }} VLAN-aware status: {{ bridge_is_vlan_aware }}"
+
+    - name: Configure VLAN-aware bridge
+      when: not bridge_is_vlan_aware
+      block:
+    - name: Check if bridge configuration exists
+      ansible.builtin.shell: |
+        grep -A 20 "^auto {{ proxmox_bridge_name }}" /etc/network/interfaces || true
+      register: bridge_config_check
+      changed_when: false
+
+    - name: Fail if bridge doesn't exist
+      ansible.builtin.fail:
+        msg: "Bridge {{ proxmox_bridge_name }} not found in /etc/network/interfaces. Please create it manually first."
+      when: bridge_config_check.stdout == ""
+
+    - name: Add VLAN awareness to bridge configuration
+      ansible.builtin.lineinfile:
+        path: /etc/network/interfaces
+        insertafter: "^iface {{ proxmox_bridge_name }} inet"
+        line: "    {{ item }}"
+        state: present
+      loop:
+        - "bridge-vlan-aware yes"
+        - "bridge-vids {{ proxmox_bridge_vlan_range }}"
+        - "post-up echo 1 > /sys/class/net/{{ proxmox_bridge_name }}/bridge/vlan_filtering"
+      register: vlan_config_added
+
+    - name: Display warning about network restart
+      ansible.builtin.debug:
+        msg: |
+          VLAN-aware configuration has been added to {{ proxmox_bridge_name }}.
+          
+          IMPORTANT: Network configuration changed but NOT applied yet.
+          
+          To apply changes, you have two options:
+          
+          Option 1 (Safer - requires console access):
+            1. Access Proxmox console (not SSH)
+            2. Run: ifreload -a
+          
+          Option 2 (Automatic - may disconnect SSH):
+            Re-run this playbook with: -e restart_networking=true
+          
+          Backup saved at: /etc/network/interfaces.backup.*
+      when: vlan_config_added.changed
+
+    - name: Reload network configuration (if enabled)
+      ansible.builtin.command: ifreload -a
+      when:
+        - restart_networking | bool
+        - vlan_config_added.changed
+      register: network_reload
+      changed_when: true
+
+    - name: Enable VLAN filtering immediately (runtime)
+      ansible.builtin.command: ip link set {{ proxmox_bridge_name }} type bridge vlan_filtering 1
+      when:
+        - restart_networking | bool
+        - vlan_config_added.changed
+      register: vlan_filtering_enabled
+      changed_when: true
+
+    - name: Warning if network was reloaded
+      ansible.builtin.debug:
+        msg: "Network configuration reloaded and VLAN filtering enabled. If SSH connection was lost, reconnect to verify."
+      when:
+        - restart_networking | bool
+        - network_reload.changed
+
+# Verification tasks (works for both modes)
+- name: Get list of all bridges
+  ansible.builtin.shell: |
+    ip -br link show type bridge | awk '{print $1}'
+  register: existing_bridges
+  changed_when: false
+
+- name: Display existing bridges
+  ansible.builtin.debug:
+    msg: "Existing bridges: {{ existing_bridges.stdout_lines }}"
+
+- name: Verify VLAN filtering status for all bridges
+  ansible.builtin.shell: |
+    for br in $(ip -br link show type bridge | awk '{print $1}'); do
+      status=$(ip -d link show "$br" | grep -o 'vlan_filtering 1' && echo "ENABLED" || echo "DISABLED")
+      echo "$br: $status"
+    done
+  register: all_vlan_status
+  changed_when: false
+
+- name: Display VLAN filtering status
+  ansible.builtin.debug:
+    msg: "{{ all_vlan_status.stdout_lines }}"
+
+- name: Summary
+  ansible.builtin.debug:
+    msg:
+      - "Network configuration summary:"
+      - "  Bridges configured: {{ (proxmox_bridges | map(attribute='name') | list) if proxmox_bridges | length > 0 else [proxmox_bridge_name] }}"
+      - "  Changes applied: {{ network_reload.changed if network_reload is defined and restart_networking | bool else 'No (manual reload required)' }}"
+      - ""
+      - "Next steps:"
+      - "  1. Verify bridges in Proxmox UI: Datacenter > Node > System > Network"
+      - "  2. If changes not applied, reload network: ifreload -a (via console)"
+      - "  3. Check VLAN filtering: ip -d link show <bridge>"

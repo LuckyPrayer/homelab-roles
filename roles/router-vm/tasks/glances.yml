@@ -1,0 +1,57 @@
+---
+# Glances System Monitoring for Router VM
+# Provides system metrics API for Homepage dashboard widgets
+
+- name: Create Glances directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  loop:
+    - /opt/stacks
+    - /opt/stacks/glances
+
+- name: Deploy Glances docker-compose configuration
+  ansible.builtin.copy:
+    dest: /opt/stacks/glances/docker-compose.yml
+    mode: '0644'
+    owner: root
+    group: root
+    content: |
+      ---
+      # Glances - System Monitoring
+      # Provides API for Homepage widgets
+      
+      services:
+        glances:
+          image: nicolargo/glances:latest-full
+          container_name: glances
+          restart: unless-stopped
+          pid: host
+          network_mode: host
+          privileged: true
+          environment:
+            - GLANCES_OPT=-w
+          volumes:
+            - /var/run/docker.sock:/var/run/docker.sock:ro
+            - /etc/os-release:/etc/os-release:ro
+  notify: restart glances
+
+- name: Allow Glances API through firewall
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: 61208
+    source: "{{ router_glances_allowed_networks | default('192.168.0.0/16') }}"
+    jump: ACCEPT
+    comment: "Allow Glances API for Homepage widgets"
+  notify: save iptables
+
+- name: Start Glances container
+  ansible.builtin.shell: |
+    cd /opt/stacks/glances
+    docker compose up -d
+  register: glances_start
+  changed_when: "'Started' in glances_start.stdout or 'Created' in glances_start.stdout"

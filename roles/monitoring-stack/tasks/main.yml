@@ -1,0 +1,175 @@
+---
+# Monitoring Stack Role - Main Tasks
+# Deploys Grafana, Prometheus, Loki, Alertmanager on argus hosts
+
+- name: Include Infisical secrets
+  ansible.builtin.include_tasks: infisical.yml
+  when: grafana_enabled | default(false)
+  tags: [monitoring, grafana]
+
+- name: Create monitoring directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /opt/monitoring
+    - /opt/monitoring/grafana
+    - /opt/monitoring/grafana/provisioning
+    - /opt/monitoring/grafana/provisioning/datasources
+    - /opt/monitoring/grafana/provisioning/dashboards
+    - /opt/monitoring/grafana/provisioning/alerting
+    - /opt/monitoring/grafana/dashboards
+    - /opt/monitoring/prometheus
+    - /opt/monitoring/prometheus/rules
+    - /opt/monitoring/loki
+    - /opt/monitoring/alertmanager
+    - /opt/monitoring/alloy
+  tags: [monitoring]
+
+- name: Template Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /opt/monitoring/prometheus/prometheus.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, prometheus]
+
+- name: Template Prometheus alert rules
+  ansible.builtin.template:
+    src: alert-rules.yml.j2
+    dest: /opt/monitoring/prometheus/rules/alerts.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, prometheus]
+
+- name: Template Loki configuration
+  ansible.builtin.template:
+    src: loki-config.yml.j2
+    dest: /opt/monitoring/loki/loki-config.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, loki]
+
+- name: Template Alertmanager configuration
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: /opt/monitoring/alertmanager/alertmanager.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, alertmanager]
+
+- name: Template Alloy configuration
+  ansible.builtin.template:
+    src: alloy-config.river.j2
+    dest: /opt/monitoring/alloy/config.river
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, alloy]
+
+- name: Template Grafana datasources
+  ansible.builtin.template:
+    src: grafana-datasources.yml.j2
+    dest: /opt/monitoring/grafana/provisioning/datasources/datasources.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, grafana]
+
+- name: Template Grafana alerting configuration
+  ansible.builtin.template:
+    src: grafana-alerting.yml.j2
+    dest: /opt/monitoring/grafana/provisioning/alerting/alerting.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, grafana]
+
+- name: Template Grafana alert rules
+  ansible.builtin.template:
+    src: grafana-alert-rules.yml.j2
+    dest: /opt/monitoring/grafana/provisioning/alerting/alert-rules.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, grafana]
+
+- name: Template Grafana dashboard provisioning
+  ansible.builtin.template:
+    src: grafana-dashboards.yml.j2
+    dest: /opt/monitoring/grafana/provisioning/dashboards/dashboards.yml
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [monitoring, grafana]
+
+- name: Copy default Grafana dashboards
+  ansible.builtin.copy:
+    src: "dashboards/"
+    dest: /opt/monitoring/grafana/dashboards/
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [monitoring, grafana]
+
+- name: Template docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/monitoring/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring]
+
+- name: Template environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: /opt/monitoring/.env
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart monitoring stack
+  tags: [monitoring]
+
+- name: Ensure homelab network exists
+  ansible.builtin.command:
+    cmd: docker network create homelab
+  register: network_create
+  changed_when: network_create.rc == 0
+  failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
+  tags: [monitoring]
+
+- name: Pull monitoring stack images
+  ansible.builtin.command:
+    cmd: docker compose pull
+    chdir: /opt/monitoring
+  changed_when: true
+  tags: [monitoring]
+
+- name: Start monitoring stack
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: /opt/monitoring
+  changed_when: true
+  tags: [monitoring]
+
+- name: Display monitoring stack status
+  ansible.builtin.debug:
+    msg: "Monitoring stack containers started"
+  tags: [monitoring]

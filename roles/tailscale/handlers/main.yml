@@ -1,0 +1,19 @@
+---
+# Tailscale Role Handlers
+
+- name: restart tailscaled
+  ansible.builtin.systemd:
+    name: tailscaled
+    state: restarted
+    daemon_reload: yes
+
+- name: enable tailscaled
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: yes
+    state: started
+
+- name: save iptables
+  ansible.builtin.command:
+    cmd: netfilter-persistent save
+  changed_when: false

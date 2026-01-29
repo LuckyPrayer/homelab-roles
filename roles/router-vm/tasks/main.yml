@@ -1,0 +1,321 @@
+---
+# Router VM Configuration Tasks
+# This role configures a Debian 13 VM as a router/gateway
+
+- name: Set timezone to America/Toronto (EST/EDT)
+  ansible.builtin.timezone:
+    name: America/Toronto
+  become: true
+
+- name: Wait for cloud-init to complete
+  ansible.builtin.command:
+    cmd: cloud-init status --wait
+  changed_when: false
+  failed_when: false
+  timeout: 300
+
+- name: Verify DNS resolution
+  ansible.builtin.command:
+    cmd: getent hosts deb.debian.org
+  changed_when: false
+  failed_when: false
+  register: dns_check
+
+- name: Display DNS check result
+  ansible.builtin.debug:
+    msg: "DNS resolution: {{ 'Working' if dns_check.rc == 0 else 'Failed - ' + dns_check.stderr }}"
+
+- name: Fix any interrupted dpkg operations
+  ansible.builtin.command: dpkg --configure -a
+  changed_when: false
+  failed_when: false
+
+- name: Ensure system packages are up to date
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  retries: 3
+  delay: 10
+  register: apt_update_result
+  until: apt_update_result is succeeded
+
+- name: Install required router packages
+  ansible.builtin.apt:
+    name:
+      - iptables
+      - net-tools
+      - iproute2
+      - tcpdump
+      - nftables
+    state: present
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Install netfilter-persistent (iptables rule persistence)
+  ansible.builtin.apt:
+    name:
+      - netfilter-persistent
+    state: present
+  ignore_errors: yes  # May not be available on all Debian versions
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Install DHCP server if enabled
+  ansible.builtin.apt:
+    name:
+      - isc-dhcp-server
+    state: present
+  when: router_enable_dhcp | bool
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Install DNS forwarder if enabled
+  ansible.builtin.apt:
+    name:
+      - dnsmasq
+    state: present
+  when: router_enable_dns_forwarding | bool
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Enable IP forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    state: present
+    sysctl_set: yes
+    reload: yes
+  when: router_enable_ip_forwarding | bool
+
+- name: Enable IPv6 forwarding (optional)
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.all.forwarding
+    value: '1'
+    state: present
+    sysctl_set: yes
+    reload: yes
+  when: router_enable_ip_forwarding | bool
+
+- name: Configure additional network interfaces with systemd-networkd
+  ansible.builtin.copy:
+    content: |
+      [Match]
+      Name={{ item.name }}
+
+      [Network]
+      Address={{ item.ip }}/{% if item.netmask == '255.255.255.0' %}24{% elif item.netmask == '255.255.0.0' %}16{% elif item.netmask == '255.0.0.0' %}8{% else %}24{% endif %}
+      {% if item.gateway is defined %}
+      Gateway={{ item.gateway }}
+      {% endif %}
+    dest: /etc/systemd/network/10-{{ item.name }}.network
+    mode: '0644'
+  loop: "{{ router_interfaces }}"
+  when: router_interfaces | length > 0
+  notify: restart networkd
+
+- name: Enable systemd-networkd
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    enabled: yes
+    state: started
+
+- name: Restart systemd-networkd to apply changes
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    state: restarted
+  when: router_interfaces | length > 0
+
+- name: Configure NAT with iptables
+  when: router_enable_nat | bool
+  block:
+    - name: Enable NAT masquerading
+      ansible.builtin.iptables:
+        table: nat
+        chain: POSTROUTING
+        out_interface: "{{ router_nat_interface }}"
+        jump: MASQUERADE
+      notify: save iptables
+
+    - name: Allow forwarding from internal to external
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: "{{ item.name }}"
+        out_interface: "{{ router_nat_interface }}"
+        jump: ACCEPT
+      loop: "{{ router_interfaces }}"
+      when: router_interfaces | length > 0
+      notify: save iptables
+
+    - name: Allow established connections back
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: "{{ router_nat_interface }}"
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+      notify: save iptables
+
+- name: Configure basic firewall rules
+  when: router_enable_firewall | bool
+  block:
+    - name: Allow loopback traffic
+      ansible.builtin.iptables:
+        chain: INPUT
+        in_interface: lo
+        jump: ACCEPT
+
+    - name: Allow established connections
+      ansible.builtin.iptables:
+        chain: INPUT
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+
+    - name: Allow SSH (MUST be before setting default policy)
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 22
+        jump: ACCEPT
+
+    - name: Set default INPUT policy (MUST be after allowing SSH)
+      ansible.builtin.iptables:
+        chain: INPUT
+        policy: "{{ router_firewall_default_policy }}"
+
+    - name: Allow DHCP
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: udp
+        destination_port: 67
+        jump: ACCEPT
+      when: "'dhcp' in router_allowed_services"
+
+    - name: Allow DNS
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: "{{ item }}"
+        destination_port: 53
+        jump: ACCEPT
+      loop:
+        - tcp
+        - udp
+      when: "'dns' in router_allowed_services"
+
+    - name: Allow ICMP (ping)
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: icmp
+        jump: ACCEPT
+
+    - name: Save iptables rules
+      ansible.builtin.command:
+        cmd: netfilter-persistent save
+      changed_when: false
+      ignore_errors: yes  # May fail if netfilter-persistent is not installed
+
+- name: Configure VLAN isolation rules (FORWARD chain)
+  when: 
+    - router_enable_firewall | bool
+    - router_vlan_isolation_rules | length > 0
+  block:
+    - name: Apply VLAN isolation rules
+      ansible.builtin.iptables:
+        chain: FORWARD
+        source: "{{ item.source }}"
+        destination: "{{ item.destination }}"
+        jump: "{{ item.action | default('REJECT') }}"
+        reject_with: icmp-admin-prohibited
+        comment: "{{ item.name }}"
+      loop: "{{ router_vlan_isolation_rules }}"
+      notify: save iptables
+
+    - name: Log blocked VLAN traffic
+      ansible.builtin.iptables:
+        chain: FORWARD
+        source: "{{ item.source }}"
+        destination: "{{ item.destination }}"
+        jump: LOG
+        log_prefix: "FW-VLAN-BLOCK: "
+        log_level: "4"
+      loop: "{{ router_vlan_isolation_rules }}"
+      when: item.log | default(false)
+      notify: save iptables
+
+- name: Configure static routes
+  ansible.builtin.template:
+    src: static-routes.j2
+    dest: /etc/network/routes
+    mode: '0644'
+  when: router_static_routes | length > 0
+  notify: apply static routes
+
+- name: Configure DHCP server
+  when: router_enable_dhcp | bool
+  block:
+    - name: Create DHCP configuration
+      ansible.builtin.template:
+        src: dhcpd.conf.j2
+        dest: /etc/dhcp/dhcpd.conf
+        mode: '0644'
+      notify: restart dhcp
+
+    - name: Configure DHCP interfaces
+      ansible.builtin.lineinfile:
+        path: /etc/default/isc-dhcp-server
+        regexp: '^INTERFACESv4='
+        line: 'INTERFACESv4="{{ router_dhcp_interfaces | map(attribute="interface") | join(" ") }}"'
+      when: router_dhcp_interfaces | length > 0
+      notify: restart dhcp
+
+    - name: Enable and start DHCP server
+      ansible.builtin.systemd:
+        name: isc-dhcp-server
+        enabled: yes
+        state: started
+
+- name: Configure DNS forwarding with dnsmasq
+  ansible.builtin.import_tasks: dns.yml
+  tags: [dns]
+
+- name: Configure Pi-hole container
+  ansible.builtin.import_tasks: pihole.yml
+  when: 
+    - router_enable_dns_forwarding | bool
+    - pihole_password is defined
+  tags: [pihole]
+
+- name: Configure port forwarding
+  ansible.builtin.import_tasks: port-forwarding.yml
+  when: router_port_forwards is defined
+  tags: [port-forwarding]
+
+- name: Configure Glances system monitoring
+  ansible.builtin.import_tasks: glances.yml
+  when: router_enable_glances | default(true) | bool
+  tags: [glances, monitoring]
+
+- name: Include Tailscale VPN role
+  ansible.builtin.include_role:
+    name: tailscale
+  when: tailscale_enabled | default(false) | bool
+  tags: [tailscale, vpn]
+
+- name: Display router configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "Router VM configured successfully!"
+      - "Hostname: {{ vm_name }}"
+      - "Primary IP: {{ vm_ip }}"
+      - "IP Forwarding: {{ router_enable_ip_forwarding }}"
+      - "NAT Enabled: {{ router_enable_nat }}"
+      - "DHCP Enabled: {{ router_enable_dhcp }}"
+      - "DNS Forwarding: {{ router_enable_dns_forwarding }}"
+      - "Additional Interfaces: {{ router_interfaces | length }}"
+      - "Tailscale VPN: {{ tailscale_enabled | default(false) }}"

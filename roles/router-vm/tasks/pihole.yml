@@ -1,0 +1,273 @@
+---
+- name: Check if Infisical CLI is installed
+  ansible.builtin.command: which infisical
+  register: infisical_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Infisical CLI repository setup script
+  ansible.builtin.shell: |
+    curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash
+  args:
+    executable: /bin/bash
+    creates: /etc/apt/sources.list.d/infisical.list
+  when: infisical_check.rc != 0
+
+- name: Install Infisical CLI
+  ansible.builtin.apt:
+    name: infisical
+    state: present
+    update_cache: yes
+  when: infisical_check.rc != 0
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Ensure Infisical token directory exists
+  ansible.builtin.file:
+    path: /root
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+
+- name: Place Infisical service token file
+  ansible.builtin.copy:
+    dest: /root/.infisical-token
+    content: "{{ infisical_service_token }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+  when: infisical_service_token is defined and infisical_service_token | length > 0
+  no_log: true
+
+- name: Fetch Pi-hole password from Infisical
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get {{ infisical_pihole_secret_name | default('PIHOLE_PASSWORD') }} \
+      --projectId {{ infisical_project_id }} \
+      --env {{ infisical_env_slug }} \
+      --path {{ infisical_secret_path | default('/infrastructure/dns/pi-hole') }} \
+      --plain
+  register: pihole_password_result
+  changed_when: false
+  no_log: true
+  when: infisical_service_token is defined and infisical_project_id is defined
+
+- name: Set Pi-hole password from Infisical
+  ansible.builtin.set_fact:
+    pihole_password_actual: "{{ pihole_password_result.stdout }}"
+  when: 
+    - pihole_password_result is defined
+    - pihole_password_result is not skipped
+    - pihole_password_result.rc == 0
+  no_log: true
+
+- name: Fallback to inventory password if Infisical fetch failed
+  ansible.builtin.set_fact:
+    pihole_password_actual: "{{ pihole_password }}"
+  when: >
+    pihole_password_result is not defined or
+    pihole_password_result is skipped or
+    pihole_password_result.rc != 0
+
+- name: Ensure Docker is installed
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - python3-pip
+      - python3-venv
+      - curl
+    state: present
+    update_cache: yes
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Remove system python3-docker package (causes http+docker scheme issues)
+  ansible.builtin.apt:
+    name: python3-docker
+    state: absent
+
+- name: Install Docker SDK for Python via pip (fixes http+docker scheme issue)
+  ansible.builtin.pip:
+    name:
+      - docker>=7.0.0
+      - requests-unixsocket2
+    state: present
+    extra_args: --break-system-packages --force-reinstall --ignore-installed
+
+- name: Download Docker Compose v2 standalone
+  ansible.builtin.get_url:
+    url: https://github.com/docker/compose/releases/download/v2.32.0/docker-compose-linux-x86_64
+    dest: /usr/local/bin/docker-compose
+    mode: '0755'
+  register: compose_download
+  failed_when: false
+
+- name: Create Docker CLI plugins directory
+  ansible.builtin.file:
+    path: /usr/local/lib/docker/cli-plugins
+    state: directory
+    mode: '0755'
+
+- name: Create symlink for Docker Compose plugin
+  ansible.builtin.file:
+    src: /usr/local/bin/docker-compose
+    dest: /usr/local/lib/docker/cli-plugins/docker-compose
+    state: link
+  when: compose_download is succeeded
+
+- name: Check Docker Compose availability
+  ansible.builtin.command:
+    cmd: docker compose version
+  register: docker_compose_check
+  changed_when: false
+  failed_when: false
+
+- name: Ensure Docker service is running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: yes
+    state: started
+
+- name: Allow Pi-hole web interface through firewall
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "{{ pihole_web_port | default(8080) }}"
+    jump: ACCEPT
+    comment: "Allow Pi-hole web interface"
+  notify: save iptables
+
+- name: Create Pi-hole directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  loop:
+    - /opt/pihole
+    - /opt/pihole/etc-pihole
+    - /opt/pihole/etc-dnsmasq.d
+
+- name: Deploy Pi-hole docker-compose configuration
+  ansible.builtin.template:
+    src: pihole-compose.yml.j2
+    dest: /opt/pihole/docker-compose.yml
+    mode: '0644'
+    owner: root
+    group: root
+  notify: restart pihole
+
+- name: Create Pi-hole custom DNS configuration
+  ansible.builtin.copy:
+    content: |
+      # Custom DNS configuration for Pi-hole
+      # Local domains are handled by router dnsmasq
+      # This file is managed by Ansible
+    dest: /opt/pihole/etc-dnsmasq.d/02-custom.conf
+    mode: '0644'
+  notify: restart pihole
+
+- name: Wait for network connectivity to Docker Hub
+  ansible.builtin.command:
+    cmd: curl -s --connect-timeout 10 https://registry-1.docker.io/v2/
+  register: dockerhub_check
+  retries: 5
+  delay: 10
+  until: dockerhub_check.rc == 0
+  changed_when: false
+  failed_when: false
+
+- name: Pull Pi-hole Docker image
+  ansible.builtin.command:
+    cmd: docker pull pihole/pihole:latest
+  register: docker_pull_result
+  changed_when: "'Downloaded newer image' in docker_pull_result.stdout or 'Pull complete' in docker_pull_result.stdout"
+  retries: 3
+  delay: 30
+  until: docker_pull_result.rc == 0
+
+- name: Start Pi-hole container
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: /opt/pihole
+  changed_when: true
+  register: pihole_output
+
+- name: Wait for Pi-hole to be healthy
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ pihole_web_port | default(8080) }}/admin/"
+    status_code: 200
+  register: result
+  until: result.status == 200
+  retries: 30
+  delay: 2
+  ignore_errors: yes
+
+- name: Set Pi-hole web interface password
+  ansible.builtin.command:
+    cmd: docker exec pihole pihole setpassword "{{ pihole_password_actual }}"
+  register: password_set_result
+  changed_when: password_set_result.rc == 0
+  no_log: true
+
+- name: Configure Pi-hole local DNS records
+  ansible.builtin.copy:
+    content: |
+      # Local DNS records for homelab
+      # Managed by Ansible - Do not edit manually
+      # Records defined in inventories/{{ env }}/group_vars/all.yml
+      {% if dns_records is defined %}
+      {% for record in dns_records %}
+      address=/{{ record.hostname }}/{{ record.ip }}
+      {% endfor %}
+      {% endif %}
+    dest: /opt/pihole/etc-dnsmasq.d/05-homelab-dns.conf
+    mode: '0644'
+    owner: root
+    group: root
+  notify: restart pihole
+  when: dns_records is defined and dns_records | length > 0
+
+- name: Enable etc_dnsmasq_d in Pi-hole configuration
+  ansible.builtin.command:
+    cmd: docker exec pihole sed -i 's/etc_dnsmasq_d = false/etc_dnsmasq_d = true/' /etc/pihole/pihole.toml
+  register: pihole_config_update
+  changed_when: pihole_config_update.rc == 0
+  notify: restart pihole
+
+- name: Wait for Pi-hole to restart after DNS configuration
+  ansible.builtin.pause:
+    seconds: 10
+  when: dns_records is defined and dns_records | length > 0
+
+- name: Verify Pi-hole local DNS records
+  ansible.builtin.command:
+    cmd: docker exec pihole dig +short @127.0.0.1 {{ item.hostname }}
+  loop: "{{ dns_records | default([]) }}"
+  register: dns_verify
+  changed_when: false
+  failed_when: false
+  when: dns_records is defined and dns_records | length > 0
+
+- name: Display DNS verification results
+  ansible.builtin.debug:
+    msg: "{{ item.item.hostname }} resolves to {{ item.stdout }}"
+  loop: "{{ dns_verify.results | default([]) }}"
+  when: 
+    - dns_verify is defined
+    - dns_verify.results is defined
+    - item.stdout is defined
+
+- name: Display Pi-hole access information
+  ansible.builtin.debug:
+    msg:
+      - "Pi-hole Web Interface: http://{{ ansible_host }}:{{ pihole_web_port | default(8080) }}/admin"
+      - "Password: {{ pihole_password_actual }}"
+      - "DNS Server: {{ ansible_host }}:53"
+      - "Password stored securely in Infisical at: {{ infisical_secret_path | default('/infrastructure/dns/pi-hole') }}"

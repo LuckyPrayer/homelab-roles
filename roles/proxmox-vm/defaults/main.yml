@@ -1,0 +1,49 @@
+vm_name: "{{ inventory_hostname }}"
+vm_ip: null  # e.g., 192.168.1.101
+
+# Template to clone from (either by name or vmid)
+# This should match one of the templates created by proxmox-cloud-init-template role
+vm_template_name: "debian-13-generic-dev"  # Template name to clone from
+# vm_template_vmid: 1000  # Or use template VMID
+
+# VM resource configuration
+vm_cpu_cores: 2
+vm_memory_mb: 4096
+vm_disk_gb: 40
+vm_override_disk: true
+vm_onboot: true  # Start VM automatically when Proxmox host boots
+
+# Network configuration
+# Note: vm_vlan and vm_net_gateway should be set per environment in group_vars
+# - VLAN 10 (Production): 192.168.10.0/24, gateway 192.168.10.1
+# - VLAN 20 (Development): 192.168.20.0/24, gateway 192.168.20.1
+# - VLAN 2 (Management): 192.168.2.0/24, gateway 192.168.2.1
+vm_bridge: vmbr0
+vm_vlan: null  # Set to VLAN ID (e.g., 10, 20) or null for no VLAN tag
+vm_net_prefix: 24
+vm_net_gateway: 192.168.20.1  # Override per environment in group_vars
+
+# Cloud-init configuration
+# Note: Credentials are retrieved from Infisical at runtime from VM-specific paths
+# The following secrets are expected in Infisical at path /infrastructure/vms/<vm-base-name>:
+#   - VM_CI_USER: Username for the cloud-init user
+#   - VM_CI_PASSWORD: Password for the cloud-init user
+#   - VM_CI_SSH_KEY: SSH public key for the cloud-init user
+# 
+# Path structure examples:
+#   - VM "orion-dev" uses /infrastructure/vms/orion in dev environment
+#   - VM "orion-prod" uses /infrastructure/vms/orion in prod environment
+#   - VM "docker-host-01-dev" uses /infrastructure/vms/docker-host-01 in dev environment
+#
+# These values are retrieved based on the environment (dev/prod)
+vm_ci_user: ansible  # Default fallback (not used when Infisical is available)
+vm_ci_ssh_authorized_key: ""  # Default fallback (not used when Infisical is available)
+
+# Proxmox configuration
+proxmox_node: proxmoxve
+proxmox_storage: local-lvm
+
+# Additional network interfaces (for router VMs or multi-homed hosts)
+# This is automatically built from router_interfaces if present
+# Format: { net1: "virtio,bridge=vmbr0,tag=10", net2: "virtio,bridge=vmbr0,tag=20" }
+vm_additional_interfaces: {}

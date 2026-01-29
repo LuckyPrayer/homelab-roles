@@ -1,0 +1,8 @@
+# Static routes configuration
+# Managed by Ansible - do not edit manually
+
+{% for route in router_static_routes %}
+# Route to {{ route.network }}
+ip route add {{ route.network }} via {{ route.gateway }}{% if route.interface is defined %} dev {{ route.interface }}{% endif %}
+
+{% endfor %}

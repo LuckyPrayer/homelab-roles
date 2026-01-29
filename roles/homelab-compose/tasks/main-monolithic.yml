@@ -1,0 +1,145 @@
+---
+- name: Get docker group GID
+  ansible.builtin.command: getent group docker
+  register: docker_group_info
+  changed_when: false
+
+- name: Set docker_gid fact
+  ansible.builtin.set_fact:
+    docker_gid: "{{ docker_group_info.stdout.split(':')[2] }}"
+
+- name: Create app directories with proper ownership
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: docker-svc
+    group: docker
+    mode: '0750'
+  loop:
+    - /opt/homelab
+    - /opt/homelab/traefik
+    - /opt/homelab/traefik/letsencrypt
+    - /opt/homelab/mealie
+    - /opt/homelab/n8n
+    - /opt/homelab/vaultwarden
+    - /opt/homelab/data
+
+- name: Create Minecraft server directories with proper ownership
+  ansible.builtin.file:
+    path: "/opt/homelab/minecraft-{{ item.id | lower }}"
+    state: directory
+    owner: docker-svc
+    group: docker
+    mode: '0750'
+  loop: "{{ minecraft_servers | default([]) }}"
+  when: minecraft_servers is defined and minecraft_servers|length > 0
+
+- name: Template docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/homelab/docker-compose.yml
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+
+- name: Template traefik dynamic config
+  ansible.builtin.template:
+    src: traefik-dynamic.yml.j2
+    dest: /opt/homelab/traefik/dynamic.yml
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+
+- name: Ensure acme.json exists with secure permissions
+  ansible.builtin.file:
+    path: /opt/homelab/traefik/acme.json
+    state: touch
+    owner: "65534"
+    group: docker
+    mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Fix ownership of existing volume data for docker-svc user
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: docker-svc
+    group: docker
+    recurse: yes
+    mode: 'g+rX'  # Ensure group can read+execute directories
+    state: directory
+  loop:
+    - /opt/homelab/mealie
+    - /opt/homelab/n8n
+    - /opt/homelab/vaultwarden
+  when: item is directory
+  ignore_errors: yes  # Don't fail if directories don't exist yet
+
+- name: Fix ownership of Minecraft server volume data for docker-svc user
+  ansible.builtin.file:
+    path: "/opt/homelab/minecraft-{{ item.id | lower }}"
+    owner: docker-svc
+    group: docker
+    recurse: yes
+    mode: 'g+rX'  # Ensure group can read+execute directories
+    state: directory
+  loop: "{{ minecraft_servers | default([]) }}"
+  when: minecraft_servers is defined and minecraft_servers|length > 0
+  ignore_errors: yes  # Don't fail if directories don't exist yet
+
+- name: Fix ownership of Traefik acme.json for nobody user
+  ansible.builtin.file:
+    path: /opt/homelab/traefik/acme.json
+    owner: "65534"
+    group: docker
+    mode: '0640'  # Allow docker group to read for backups
+  when: ansible_check_mode == false
+  ignore_errors: yes
+
+- name: Create systemd unit for compose stack
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/homelab-compose.service
+    content: |
+      [Unit]
+      Description=Homelab Docker Compose Stack
+      After=network-online.target docker.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      User=docker-svc
+      Group=docker
+      WorkingDirectory=/opt/homelab
+      Environment=INFISICAL_ENV={{ hostvars[inventory_hostname].env | default('dev') }}
+      Environment=INFISICAL_PROJECT_ID={{ lookup('env', 'INFISICAL_PROJECT_ID') }}
+      Environment=INFISICAL_TOKEN={{ lookup('env', 'INFISICAL_TOKEN') }}
+      Environment=INFISICAL_PATHS="/ /infrastructure/n8n /infrastructure/backup /services/vaultwarden{% if minecraft_servers is defined %}{% for server in minecraft_servers %} /services/minecraft/{{ server.id }}{% endfor %}{% endif %}"
+      # Cloudflare token and other secrets are injected by Infisical via infisical-run wrapper
+      # Use --pull=missing to avoid unnecessary pulls, continue even if some images fail
+      ExecStart=/usr/local/bin/infisical-run docker compose up -d --remove-orphans --pull=missing
+      ExecStop=/usr/local/bin/infisical-run docker compose down
+      TimeoutStartSec=0
+      # Restart on failure to handle transient issues
+      Restart=on-failure
+      RestartSec=10s
+      # Security hardening
+      NoNewPrivileges=yes
+      ProtectSystem=strict
+      ProtectHome=yes
+      ReadWritePaths=/opt/homelab
+      PrivateTmp=yes
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: Enable and start homelab-compose
+  ansible.builtin.systemd:
+    name: homelab-compose.service
+    enabled: yes
+    state: started

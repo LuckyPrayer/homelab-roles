@@ -1,0 +1,31 @@
+---
+# Documentation server configuration
+docs_server_enabled: true
+docs_server_port: 8080
+docs_server_container_name: homelab-docs
+docs_server_image_name: homelab-docs
+docs_server_image_tag: latest
+docs_server_base_dir: /opt/homelab-docs
+
+# Site configuration
+docs_site_name: "Homelab Documentation"
+docs_site_description: "Comprehensive documentation for Proxmox + Docker + Traefik Homelab"
+docs_site_author: "LuckyPrayer"
+docs_repo_url: "https://github.com/LuckyPrayer/Homelab"
+docs_repo_name: "LuckyPrayer/Homelab"
+
+# Theme configuration
+docs_theme_name: material
+docs_theme_primary_color: indigo
+docs_theme_accent_color: indigo
+
+# Traefik integration (optional)
+docs_traefik_enabled: false
+docs_traefik_subdomain: "docs"
+docs_traefik_certresolver: "mytls"
+
+# Health check configuration
+docs_healthcheck_interval: 30s
+docs_healthcheck_timeout: 3s
+docs_healthcheck_retries: 3
+docs_healthcheck_start_period: 10s

@@ -1,0 +1,8 @@
+---
+# Handlers for security-users role
+
+- name: Restart sshd
+  ansible.builtin.service:
+    name: sshd
+    state: restarted
+  become: true

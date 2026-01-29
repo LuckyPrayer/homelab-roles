@@ -1,0 +1,22 @@
+---
+# Infisical CLI version to install
+infisical_cli_version: "0.43.22"
+
+# Path to store the Infisical service token
+infisical_service_token_path: "/root/.infisical-token"
+
+# Path to store the Infisical config (project ID, env, paths)
+infisical_config_path: "/etc/infisical/config.env"
+
+# Optional: Service token (can be overridden in inventory or group_vars)
+# infisical_service_token: ""
+
+# Infisical project and environment slugs (defaults)
+infisical_project_slug: "homelab"
+infisical_env_slug: "dev"
+
+# Infisical project ID (required for infisical-run)
+# infisical_project_id: ""
+
+# Paths to fetch secrets from (space-separated, later paths override earlier ones)
+infisical_secret_paths: "/"

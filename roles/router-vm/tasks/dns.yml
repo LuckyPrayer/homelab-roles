@@ -1,0 +1,82 @@
+---
+- name: Install dnsmasq and dig utility
+  ansible.builtin.apt:
+    name:
+      - dnsmasq
+      - dnsutils
+    state: present
+    update_cache: yes
+  when: router_enable_dns_forwarding | default(false)
+
+- name: Stop systemd-resolved (conflicts with dnsmasq)
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: stopped
+    enabled: no
+  when: router_enable_dns_forwarding | default(false)
+  ignore_errors: yes
+
+- name: Remove systemd-resolved stub
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: router_enable_dns_forwarding | default(false)
+
+- name: Create resolv.conf for dnsmasq
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible
+      nameserver 127.0.0.1
+      nameserver 8.8.8.8
+    dest: /etc/resolv.conf
+    mode: '0644'
+  when: router_enable_dns_forwarding | default(false)
+
+- name: Create dnsmasq configuration directory
+  ansible.builtin.file:
+    path: /etc/dnsmasq.d
+    state: directory
+    mode: '0755'
+  when: router_enable_dns_forwarding | default(false)
+
+- name: Backup original dnsmasq.conf
+  ansible.builtin.copy:
+    src: /etc/dnsmasq.conf
+    dest: /etc/dnsmasq.conf.backup
+    remote_src: yes
+    force: no
+  when: router_enable_dns_forwarding | default(false)
+
+- name: Deploy dnsmasq configuration
+  ansible.builtin.template:
+    src: dnsmasq.conf.j2
+    dest: /etc/dnsmasq.d/homelab.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: 'dnsmasq --test --conf-file=%s'
+  when: router_enable_dns_forwarding | default(false)
+  notify: restart dnsmasq
+
+- name: Configure main dnsmasq.conf to use conf-dir
+  ansible.builtin.lineinfile:
+    path: /etc/dnsmasq.conf
+    line: 'conf-dir=/etc/dnsmasq.d/,*.conf'
+    create: yes
+    mode: '0644'
+  when: router_enable_dns_forwarding | default(false)
+
+- name: Ensure dnsmasq log directory exists
+  ansible.builtin.file:
+    path: /var/log
+    state: directory
+    mode: '0755'
+  when: router_enable_dns_forwarding | default(false)
+
+- name: Enable and start dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: router_enable_dns_forwarding | default(false)

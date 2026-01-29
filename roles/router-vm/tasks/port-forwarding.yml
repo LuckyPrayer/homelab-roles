@@ -1,0 +1,53 @@
+---
+# Port Forwarding Configuration
+# Configures DNAT rules for forwarding external ports to internal services
+
+- name: Configure port forwarding rules
+  when: 
+    - router_enable_nat | bool
+    - router_port_forwards is defined
+    - router_port_forwards | length > 0
+  block:
+    - name: Create PREROUTING DNAT rules for port forwarding
+      ansible.builtin.iptables:
+        table: nat
+        chain: PREROUTING
+        in_interface: "{{ item.in_interface | default(router_nat_interface) }}"
+        protocol: "{{ item.protocol | default('tcp') }}"
+        destination_port: "{{ item.external_port }}"
+        jump: DNAT
+        to_destination: "{{ item.destination_ip }}:{{ item.destination_port | default(item.external_port) }}"
+        comment: "Forward {{ item.name | default('port ' + item.external_port|string) }}"
+      loop: "{{ router_port_forwards }}"
+      notify: save iptables
+
+    - name: Allow forwarded traffic through FORWARD chain
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: "{{ item.in_interface | default(router_nat_interface) }}"
+        protocol: "{{ item.protocol | default('tcp') }}"
+        destination: "{{ item.destination_ip }}"
+        destination_port: "{{ item.destination_port | default(item.external_port) }}"
+        ctstate: NEW
+        jump: ACCEPT
+        comment: "Allow {{ item.name | default('port ' + item.external_port|string) }}"
+      loop: "{{ router_port_forwards }}"
+      notify: save iptables
+
+    - name: Allow return traffic for forwarded connections
+      ansible.builtin.iptables:
+        chain: FORWARD
+        out_interface: "{{ item.in_interface | default(router_nat_interface) }}"
+        source: "{{ item.destination_ip }}"
+        protocol: "{{ item.protocol | default('tcp') }}"
+        source_port: "{{ item.destination_port | default(item.external_port) }}"
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+        comment: "Return traffic for {{ item.name | default('port ' + item.external_port|string) }}"
+      loop: "{{ router_port_forwards }}"
+      notify: save iptables
+
+    - name: Display port forwarding summary
+      ansible.builtin.debug:
+        msg: "Port forwarding configured: {{ item.name | default('Port ' + item.external_port|string) }} - {{ router_nat_interface }}:{{ item.external_port }} -> {{ item.destination_ip }}:{{ item.destination_port | default(item.external_port) }} ({{ item.protocol | default('tcp') }})"
+      loop: "{{ router_port_forwards }}"

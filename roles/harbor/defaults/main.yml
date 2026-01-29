@@ -1,0 +1,84 @@
+---
+# Harbor Role Default Variables
+
+# Harbor version
+harbor_version: "v2.11.1"
+
+# Harbor installer download URL
+harbor_installer_url: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-offline-installer-{{ harbor_version }}.tgz"
+
+# Base configuration
+harbor_install_dir: "/opt/harbor-installer"  # Where Harbor installer is extracted
+harbor_data_dir: "/opt/harbor/data"  # Where Harbor stores data
+harbor_log_dir: "/opt/harbor/logs"   # Where Harbor stores logs
+
+# Network configuration
+harbor_http_port: 8082
+harbor_hostname: "harbor.{{ env }}.{{ base_domain }}"
+harbor_external_url: "https://{{ harbor_hostname }}"
+
+# Database configuration
+harbor_db_name: "registry"
+harbor_db_user: "harbor"
+harbor_db_max_idle_conns: 100
+harbor_db_max_open_conns: 900
+
+# Redis configuration
+harbor_redis_db_index: 1
+harbor_redis_db_index_reg: 1
+harbor_redis_db_index_js: 2
+harbor_redis_db_index_cache: 3
+
+# Storage configuration
+harbor_storage_driver: "filesystem"
+harbor_storage_path: "{{ harbor_data_dir }}/registry"
+
+# Registry configuration
+harbor_registry_replicas: 1
+
+# JobService configuration
+harbor_jobservice_replicas: 1
+
+# Chart repository (Harbor supports Helm charts)
+harbor_chart_repository_url: "{{ harbor_external_url }}/chartrepo"
+
+# Security
+harbor_enable_ssl: false  # SSL is handled by Traefik
+harbor_internal_tls: false
+
+# Session timeout (minutes)
+harbor_session_timeout: 60
+
+# Logging
+harbor_log_level: "info"
+harbor_log_rotate_count: 50
+harbor_log_rotate_size: "200M"
+
+# Robot token expiration (days)
+harbor_robot_token_duration: 30
+
+# Garbage collection
+harbor_gc_schedule: "0 0 * * *"  # Daily at midnight
+
+# Trivy (vulnerability scanner)
+harbor_trivy_enabled: true
+harbor_trivy_skip_update: false
+harbor_trivy_offline_scan: false
+
+# Notary (content trust)
+harbor_notary_enabled: false
+
+# Clair (deprecated, use Trivy instead)
+harbor_clair_enabled: false
+
+# Projects
+harbor_default_project_quota: "-1"  # -1 means unlimited
+
+# Infisical configuration for Harbor secrets
+harbor_infisical_path: "/infrastructure/harbor"
+harbor_infisical_env: "{{ infisical_env_slug }}"
+
+# Expected secrets in Infisical:
+# - HARBOR_ADMIN_PASSWORD: Admin password for Harbor
+# - HARBOR_DB_PASSWORD: PostgreSQL database password
+# - HARBOR_SECRET_KEY: Secret key for encrypting passwords (32 chars)

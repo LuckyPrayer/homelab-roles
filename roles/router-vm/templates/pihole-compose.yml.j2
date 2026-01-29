@@ -1,0 +1,48 @@
+services:
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    hostname: pihole-{{ inventory_hostname }}
+    ports:
+      # Web interface (accessible from management network)
+      - "{{ pihole_web_port | default(8080) }}:80/tcp"
+      # DNS on localhost only (dnsmasq forwards to this)
+      - "127.0.0.1:{{ pihole_dns_port | default(5053) }}:53/tcp"
+      - "127.0.0.1:{{ pihole_dns_port | default(5053) }}:53/udp"
+    environment:
+      TZ: "{{ pihole_timezone | default('UTC') }}"
+      WEBPASSWORD: "{{ pihole_password_actual | default(pihole_password) }}"
+      # Upstream DNS servers
+      PIHOLE_DNS_: "{{ pihole_upstream_dns | join(';') }}"
+      # Security and performance
+      DNSSEC: "true"
+      DNSMASQ_LISTENING: "local"
+      REV_SERVER: "false"
+      # Logging configuration
+      QUERY_LOGGING: "true"
+      FTLCONF_MAXDBDAYS: "30"
+      FTLCONF_MAXLOGAGE: "24.0"
+      # Web interface settings
+      VIRTUAL_HOST: "pihole.{{ inventory_hostname }}"
+      WEBTHEME: "default-dark"
+    volumes:
+      - /opt/pihole/etc-pihole:/etc/pihole
+      - /opt/pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+      - 8.8.8.8
+    networks:
+      - pihole_net
+    healthcheck:
+      test: ["CMD", "dig", "+short", "@127.0.0.1", "pi.hole"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  pihole_net:
+    driver: bridge

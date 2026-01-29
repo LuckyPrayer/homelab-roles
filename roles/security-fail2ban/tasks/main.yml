@@ -1,0 +1,131 @@
+---
+# Security Fail2ban Role - Main Tasks
+
+- name: Skip if fail2ban is disabled
+  ansible.builtin.debug:
+    msg: "Fail2ban is disabled for this host"
+  when: not (fail2ban_enabled | default(true) | bool)
+
+- name: Install and configure fail2ban
+  when: fail2ban_enabled | default(true) | bool
+  block:
+    - name: Install fail2ban
+      ansible.builtin.apt:
+        name:
+          - fail2ban
+          - iptables
+        state: present
+        update_cache: yes
+      become: true
+
+    - name: Create fail2ban configuration directory
+      ansible.builtin.file:
+        path: /etc/fail2ban/jail.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      become: true
+
+    - name: Create fail2ban filter directory
+      ansible.builtin.file:
+        path: /etc/fail2ban/filter.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      become: true
+
+    - name: Deploy fail2ban local configuration
+      ansible.builtin.template:
+        src: jail.local.j2
+        dest: /etc/fail2ban/jail.local
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      notify: restart fail2ban
+
+    - name: Deploy SSHD jail configuration
+      ansible.builtin.template:
+        src: jail.d/sshd.conf.j2
+        dest: /etc/fail2ban/jail.d/sshd.conf
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      when: fail2ban_sshd_enabled | default(true) | bool
+      notify: restart fail2ban
+
+    - name: Deploy Traefik jail configuration
+      ansible.builtin.template:
+        src: jail.d/traefik.conf.j2
+        dest: /etc/fail2ban/jail.d/traefik.conf
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      when: (fail2ban_traefik_enabled | default(false) | bool) or (traefik_enabled | default(false) | bool)
+      notify: restart fail2ban
+
+    - name: Ensure Traefik logs directory exists
+      ansible.builtin.file:
+        path: /opt/stacks/traefik/logs
+        state: directory
+        owner: "65534"
+        group: docker
+        mode: '0755'
+      become: true
+      when: (fail2ban_traefik_enabled | default(false) | bool) or (traefik_enabled | default(false) | bool)
+
+    - name: Create empty Traefik access log if missing
+      ansible.builtin.file:
+        path: "{{ fail2ban_traefik_logpath }}"
+        state: touch
+        owner: "65534"
+        group: docker
+        mode: '0644'
+        modification_time: preserve
+        access_time: preserve
+      become: true
+      when: (fail2ban_traefik_enabled | default(false) | bool) or (traefik_enabled | default(false) | bool)
+
+    - name: Deploy Traefik filter
+      ansible.builtin.template:
+        src: filter.d/traefik-auth.conf.j2
+        dest: /etc/fail2ban/filter.d/traefik-auth.conf
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      when: (fail2ban_traefik_enabled | default(false) | bool) or (traefik_enabled | default(false) | bool)
+      notify: restart fail2ban
+
+    - name: Deploy Discord notification action
+      ansible.builtin.template:
+        src: action.d/discord-notify.conf.j2
+        dest: /etc/fail2ban/action.d/discord-notify.conf
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      when: fail2ban_discord_enabled | default(false) | bool
+      notify: restart fail2ban
+
+    - name: Enable and start fail2ban service
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      become: true
+
+    - name: Verify fail2ban is running
+      ansible.builtin.command: fail2ban-client status
+      register: fail2ban_status
+      changed_when: false
+      become: true
+
+    - name: Display fail2ban status
+      ansible.builtin.debug:
+        msg: "{{ fail2ban_status.stdout_lines }}"

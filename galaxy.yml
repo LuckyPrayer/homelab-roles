@@ -1,0 +1,34 @@
+---
+namespace: luckyprayer
+name: homelab_roles
+version: 1.0.0
+readme: README.md
+authors:
+  - LuckyPrayer
+
+description: >-
+  Ansible roles for homelab infrastructure automation including Proxmox VM
+  provisioning, Docker container management, Harbor registry, and more.
+
+license:
+  - MIT
+
+tags:
+  - homelab
+  - proxmox
+  - docker
+  - infrastructure
+  - automation
+
+dependencies: {}
+
+repository: https://github.com/LuckyPrayer/homelab-roles
+documentation: https://github.com/LuckyPrayer/homelab-roles
+homepage: https://github.com/LuckyPrayer/homelab-roles
+issues: https://github.com/LuckyPrayer/homelab-roles/issues
+
+build_ignore:
+  - .git
+  - .github
+  - tests
+  - .venv

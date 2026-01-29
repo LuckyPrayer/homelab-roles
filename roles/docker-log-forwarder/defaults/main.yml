@@ -1,0 +1,22 @@
+---
+# Docker Log Forwarder Role Defaults
+
+# Enable the log forwarder service
+docker_log_forwarder_enabled: true
+
+# Discord bot webhook URL (set in group_vars/all.yml or host_vars)
+# discord_bot_webhook_url: "http://192.168.20.200:8085"
+
+# Minimum log level to forward
+docker_log_forwarder_level: info
+
+# Batch settings
+docker_log_forwarder_batch_size: 10
+docker_log_forwarder_batch_timeout: 5
+
+# Container patterns to exclude (regex)
+docker_log_forwarder_exclude:
+  - "^k8s_.*"
+  - "^POD$"
+  - "log-forwarder"
+  - "portainer_agent"

@@ -1,0 +1,35 @@
+---
+# Example inventory configuration for AI Support Agent
+# Add these variables to your host_vars or group_vars
+
+# Enable the AI agent
+ai_agent_enabled: true
+
+# Your Discord Guild (Server) ID
+ai_agent_guild_id: "YOUR_DISCORD_GUILD_ID"
+
+# Path to the homelab codebase on the host
+# This will be mounted read-only into the container
+ai_agent_codebase_path: "/home/user/Homelab"
+
+# Behavior settings
+ai_agent_auto_respond: true      # Auto-respond to alerts (recommended)
+ai_agent_auto_remediate: false   # Auto-fix issues (use with caution!)
+
+# Discord channel IDs to monitor for alerts
+ai_agent_channels:
+  alerts: "123456789012345678"        # General alerts channel
+  critical: "123456789012345679"      # Critical alerts channel
+  infrastructure: "123456789012345680" # Infrastructure alerts
+  docker: "123456789012345681"        # Docker-specific alerts
+  ai_agent: "123456789012345682"      # AI agent commands/status channel
+
+# Optional: Sync codebase from GitHub instead of local mount
+# ai_agent_sync_codebase: true
+# ai_agent_github_owner: "YourUsername"
+# ai_agent_github_repo: "Homelab"
+# ai_agent_codebase_branch: "main"
+
+# Optional: Expose via Traefik
+# ai_agent_traefik_enabled: true
+# ai_agent_hostname: "ai-agent.your-domain.com"

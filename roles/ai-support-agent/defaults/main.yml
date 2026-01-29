@@ -1,0 +1,65 @@
+---
+# Default variables for Oracle AI Support Agent role (Claude Code CLI version)
+
+# Agent identity - Oracle is the AI agent for homelab support
+oracle_user: "oracle"
+oracle_uid: 3100
+oracle_gid: 3100
+oracle_home: "/home/oracle"
+oracle_command_prefix: "!"
+
+# Container and image naming
+oracle_container_name: "homelab-oracle"
+oracle_image: "homelab-oracle:latest"
+
+# Infisical configuration
+# Secrets stored at /infrastructure/monitoring/oracle/
+# Required secrets:
+#   - DISCORD_BOT_TOKEN: Discord bot token for Oracle
+#   - ANTHROPIC_API_KEY: Claude API key
+#   - ORACLE_SSH_PRIVATE_KEY: SSH private key for remote access
+oracle_use_infisical: true
+oracle_infisical_path: "/infrastructure/monitoring/oracle/"
+
+# Build configuration
+oracle_build_local: true
+oracle_force_rebuild: false
+
+# Channel provisioning - auto-create agent channel in Discord
+oracle_auto_provision_channels: true
+oracle_category_name: "Homelab AI"
+oracle_channel_name: "oracle"
+
+# Behavior settings
+oracle_auto_respond: true
+oracle_auto_remediate: true 
+
+# Note: Edit tools (Write, Edit, MultiEdit) are automatically enabled
+# in dev environment and disabled in prod/staging. This is controlled
+# by the ENVIRONMENT variable and cannot be overridden.
+
+# Path to mount the homelab codebase (for Claude to search)
+# In dev: mounted as read-write (allows Oracle to edit files)
+# In prod/staging: mounted as read-only
+oracle_codebase_path: "/opt/homelab"
+
+# Traefik configuration (disabled by default)
+oracle_traefik_enabled: false
+# oracle_hostname: "oracle.dev.thebozic.com"
+
+# SSH configuration for remote diagnostics
+oracle_ssh_enabled: true
+oracle_create_user_on_hosts: true  # Create oracle user on all docker hosts
+
+# Channel IDs - Override these in inventory (optional if auto-provisioning)
+# oracle_guild_id: ""
+# oracle_channels:
+#   alerts: ""
+#   critical: ""
+#   status: ""
+#   infrastructure: ""
+#   docker: ""
+#   oracle: ""  # Will be auto-created if not specified
+
+# Legacy variable mapping (for backwards compatibility)
+ai_agent_enabled: "{{ oracle_enabled | default(true) }}"

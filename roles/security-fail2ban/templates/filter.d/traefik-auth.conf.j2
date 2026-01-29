@@ -1,0 +1,20 @@
+# Fail2ban Filter for Traefik Authentication Failures
+# Managed by Ansible - Do not edit manually
+#
+# Matches 401 Unauthorized and 403 Forbidden responses in Traefik access logs
+# Common log format: <IP> - - [date] "METHOD /path HTTP/x.x" <status_code> ...
+
+[Definition]
+
+# Match 401 and 403 responses from Traefik access logs
+# Works with both common and JSON log formats
+
+# Common log format
+failregex = ^<HOST> - .* "(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH) [^"]+" (401|403) .*$
+            ^.*"ClientHost":"<HOST>".*"OriginStatus":(401|403).*$
+
+ignoreregex =
+
+# Date pattern for Traefik logs
+datepattern = %%d/%%b/%%Y:%%H:%%M:%%S %%z
+              ^%%Y-%%m-%%dT%%H:%%M:%%S

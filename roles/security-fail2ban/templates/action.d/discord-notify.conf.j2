@@ -1,0 +1,23 @@
+# Fail2ban Discord Notification Action
+# Managed by Ansible - Do not edit manually
+# Host: {{ inventory_hostname }}
+
+[Definition]
+
+actionstart = curl -s -X POST "${FAIL2BAN_DISCORD_WEBHOOK}" \
+    -H "Content-Type: application/json" \
+    -d '{"embeds":[{"title":"🛡️ Fail2ban Started","description":"Jail **<name>** is now active on **{{ inventory_hostname }}**","color":3066993}]}'
+
+actionstop = curl -s -X POST "${FAIL2BAN_DISCORD_WEBHOOK}" \
+    -H "Content-Type: application/json" \
+    -d '{"embeds":[{"title":"⚠️ Fail2ban Stopped","description":"Jail **<name>** has stopped on **{{ inventory_hostname }}**","color":15158332}]}'
+
+actionban = curl -s -X POST "${FAIL2BAN_DISCORD_WEBHOOK}" \
+    -H "Content-Type: application/json" \
+    -d '{"embeds":[{"title":"🚫 IP Banned","description":"**<ip>** has been banned from **{{ inventory_hostname }}**","color":15158332,"fields":[{"name":"Jail","value":"<name>","inline":true},{"name":"Failures","value":"<failures>","inline":true},{"name":"Ban Duration","value":"{{ fail2ban_bantime }}","inline":true}]}]}'
+
+actionunban = curl -s -X POST "${FAIL2BAN_DISCORD_WEBHOOK}" \
+    -H "Content-Type: application/json" \
+    -d '{"embeds":[{"title":"✅ IP Unbanned","description":"**<ip>** has been unbanned from **{{ inventory_hostname }}**","color":3066993,"fields":[{"name":"Jail","value":"<name>","inline":true}]}]}'
+
+[Init]

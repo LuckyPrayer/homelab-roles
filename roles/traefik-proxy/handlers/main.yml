@@ -1,0 +1,12 @@
+---
+# Traefik Proxy Role Handlers
+
+- name: Restart Traefik proxy
+  community.docker.docker_compose_v2:
+    project_src: "{{ traefik_proxy_base_dir }}"
+    state: restarted
+  become: yes
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  become: yes

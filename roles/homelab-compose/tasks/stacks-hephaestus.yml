@@ -1,0 +1,96 @@
+---
+# Hephaestus Stack Tasks
+# Deploys stacks for hephaestus-dev and hephaestus-prod hosts
+# Note: Harbor is deployed by a separate role, this just handles traefik
+
+# =============================================================================
+# TRAEFIK STACK
+# =============================================================================
+- name: Create traefik stack directory structure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: docker-svc
+    group: docker
+    mode: '0750'
+  loop:
+    - "{{ stacks_base_dir }}/traefik"
+    - "{{ stacks_base_dir }}/traefik/config"
+
+- name: Template traefik docker-compose
+  ansible.builtin.template:
+    src: stacks/traefik/docker-compose.yml.j2
+    dest: "{{ stacks_base_dir }}/traefik/docker-compose.yml"
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+
+- name: Template traefik dynamic config
+  ansible.builtin.template:
+    src: traefik-dynamic.yml.j2
+    dest: "{{ stacks_base_dir }}/traefik/config/dynamic.yml"
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+
+- name: Ensure traefik acme.json exists with secure permissions
+  ansible.builtin.file:
+    path: "{{ stacks_base_dir }}/traefik/config/acme.json"
+    state: touch
+    owner: "65534"
+    group: docker
+    mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Create traefik .env file
+  ansible.builtin.template:
+    src: stacks/traefik/env.j2
+    dest: "{{ stacks_base_dir }}/traefik/.env"
+    owner: docker-svc
+    group: docker
+    mode: '0600'
+
+# =============================================================================
+# GLANCES STACK (System Monitoring for Homepage widgets)
+# =============================================================================
+- name: Create glances stack directory
+  ansible.builtin.file:
+    path: "{{ stacks_base_dir }}/glances"
+    state: directory
+    owner: docker-svc
+    group: docker
+    mode: '0750'
+  when: glances_enabled | default(true)
+
+- name: Template glances docker-compose
+  ansible.builtin.template:
+    src: stacks/glances/docker-compose.yml.j2
+    dest: "{{ stacks_base_dir }}/glances/docker-compose.yml"
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+  when: glances_enabled | default(true)
+
+# =============================================================================
+# START STACKS
+# =============================================================================
+- name: Build list of hephaestus stacks
+  ansible.builtin.set_fact:
+    hephaestus_stacks:
+      - traefik
+      - glances
+
+- name: Start all stacks
+  ansible.builtin.shell: |
+    cd {{ stacks_base_dir }}/{{ item }}
+    /usr/local/bin/infisical-run docker compose up -d
+  loop: "{{ hephaestus_stacks }}"
+  become: true
+  become_user: docker-svc
+  environment:
+    INFISICAL_ENV: "{{ env | default('dev') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+  register: stack_start
+  changed_when: "'Started' in stack_start.stdout or 'Created' in stack_start.stdout"

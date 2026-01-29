@@ -1,0 +1,57 @@
+---
+# Security Fail2ban Role - Default Variables
+
+# Enable/disable fail2ban entirely
+fail2ban_enabled: true
+
+# ============================================================================
+# Global Settings
+# ============================================================================
+
+# IPs/networks to never ban (space-separated)
+# Management VLAN (192.168.2.0/24) is always whitelisted
+fail2ban_ignoreip: "127.0.0.1/8 ::1 192.168.2.0/24"
+
+# Default ban duration (use time abbreviation: s, m, h, d, w)
+fail2ban_bantime: "1h"
+
+# Time window to count failures
+fail2ban_findtime: "10m"
+
+# Number of failures before ban
+fail2ban_maxretry: 5
+
+# Ban action (default uses iptables)
+fail2ban_banaction: "iptables-multiport"
+
+# ============================================================================
+# SSHD Jail (enabled by default)
+# ============================================================================
+
+fail2ban_sshd_enabled: true
+fail2ban_sshd_port: "ssh"
+fail2ban_sshd_logpath: "/var/log/auth.log"
+fail2ban_sshd_maxretry: 3
+fail2ban_sshd_bantime: "24h"
+fail2ban_sshd_findtime: "10m"
+
+# ============================================================================
+# Traefik Jail (enabled when traefik_enabled is true on host)
+# ============================================================================
+
+# Set to true to enable Traefik auth failure monitoring
+# Automatically enabled when traefik_enabled is set on the host
+fail2ban_traefik_enabled: false
+fail2ban_traefik_port: "http,https"
+fail2ban_traefik_logpath: "/opt/stacks/traefik/logs/access.log"
+fail2ban_traefik_maxretry: 10
+fail2ban_traefik_bantime: "1h"
+fail2ban_traefik_findtime: "10m"
+
+# ============================================================================
+# Discord Notifications (optional)
+# ============================================================================
+
+# Enable Discord webhook notifications for bans
+fail2ban_discord_enabled: false
+# Webhook URL from Infisical at /infrastructure/fail2ban/DISCORD_WEBHOOK

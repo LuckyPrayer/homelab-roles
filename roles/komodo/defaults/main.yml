@@ -1,0 +1,113 @@
+---
+# Komodo Role - Default Variables
+# Override these in group_vars or host_vars as needed
+
+# ============================================================================
+# DEPLOYMENT MODE
+# ============================================================================
+# komodo_mode: Determines what gets deployed on this host
+#   - "core"      : Deploy Core + MongoDB + Periphery (management server)
+#   - "periphery" : Deploy only Periphery agent (monitored hosts)
+#   - "disabled"  : Skip Komodo deployment entirely
+komodo_mode: "disabled"
+
+# komodo_core_host: IP/hostname of the Komodo Core server
+# Required for periphery-only hosts to connect back to core
+# Set this in group_vars to the argus host IP
+komodo_core_host: ""
+
+# ============================================================================
+# VERSION CONFIGURATION
+# ============================================================================
+komodo_version: "latest"
+# MongoDB 4.4 is the last version that doesn't require AVX CPU support
+# Use "7" only if your CPU supports AVX instructions
+komodo_mongo_version: "4.4"
+
+# ============================================================================
+# CORE CONFIGURATION (only used when komodo_mode == "core")
+# ============================================================================
+komodo_host: "https://komodo.{{ env }}.{{ base_domain }}"
+komodo_title: "Homelab - {{ env | upper }}"
+komodo_mongo_volume: "komodo-mongo-data"
+
+# Traefik integration for Core UI
+komodo_traefik_enabled: true
+komodo_traefik_subdomain: "komodo"
+
+# ============================================================================
+# PERIPHERY CONFIGURATION (used in both "core" and "periphery" modes)
+# ============================================================================
+komodo_periphery_port: 8120
+
+# Periphery servers to auto-register in Komodo Core
+# This is dynamically built from inventory in the role tasks
+# Override this if you need manual control over registered servers
+# Format: [{ name: "server-name", address: "ip", port: 8120 }, ...]
+komodo_periphery_servers: []
+
+# ============================================================================
+# AUTO-DEPLOYMENT
+# ============================================================================
+# komodo_auto_deploy: Automatically run deploy-all procedure after ResourceSync
+# This triggers deployment of all stacks (Harbor, Traefik, n8n, etc.) via Komodo
+# Set to false if you want to manually control stack deployment
+komodo_auto_deploy: true
+
+# ============================================================================
+# AUTO-RESTORE (Post-Deployment)
+# ============================================================================
+# NOTE: If using docker-backup role with restore_enabled=true and 
+# restore_use_komodo_scripts=true (the default), data is restored BEFORE
+# containers are deployed, eliminating the need for post-deployment restore.
+# The settings below are for post-deployment restore via Komodo procedures.
+#
+# komodo_auto_restore: Automatically restore Harbor from B2 backup after deployment
+# This restores Harbor data (projects, images) from the latest backup snapshot
+# DEPRECATED: Use docker-backup role with restore_enabled=true instead
+# This runs AFTER containers start, requiring restart after restore
+komodo_auto_restore: false  # Set to true if not using pre-restore
+
+# komodo_auto_deploy_minecraft: Automatically deploy Minecraft stacks after Harbor restore
+# Requires Harbor to be restored first (needs the minecraft-server image)
+# Deploys Minecraft containers using images from restored Harbor registry
+komodo_auto_deploy_minecraft: true
+
+# komodo_auto_restore_minecraft: Automatically restore Minecraft world data from B2 backup
+# Runs after Minecraft stacks are deployed to restore world saves
+# Restores all world data, player data, and server configuration
+komodo_auto_restore_minecraft: true
+
+# ============================================================================
+# RESOURCE LIMITS
+# ============================================================================
+komodo_core_memory_limit: "512m"
+komodo_mongo_memory_limit: "512m"
+komodo_periphery_memory_limit: "256m"
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+komodo_logging_driver: json-file
+komodo_logging_max_size: "10m"
+komodo_logging_max_file: "3"
+
+# ============================================================================
+# ADMIN CREDENTIALS (for auto-sync setup)
+# ============================================================================
+# These credentials are used to:
+# 1. Create the initial admin user on first startup
+# 2. Authenticate API calls during Ansible deployment
+# Override via secrets or group_vars for production
+komodo_admin_username: "admin"
+komodo_admin_password: "changeme"  # Override this with a secure password!
+
+# ============================================================================
+# INFISICAL SECRETS
+# ============================================================================
+# Expected secrets at /services/komodo/:
+#   - KOMODO_PASSKEY: Shared key between core and periphery agents
+#   - KOMODO_WEBHOOK_SECRET: (optional) For GitHub/GitLab webhooks
+#   - KOMODO_INIT_ADMIN_USERNAME: (optional) Initial admin username
+#   - KOMODO_INIT_ADMIN_PASSWORD: (optional) Initial admin password
+komodo_infisical_path: "/services/komodo"

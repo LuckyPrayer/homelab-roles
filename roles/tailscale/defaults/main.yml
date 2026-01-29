@@ -1,0 +1,60 @@
+---
+# Tailscale Role Defaults
+# This role installs and configures Tailscale VPN for secure remote access
+
+# Enable/disable Tailscale
+tailscale_enabled: false
+
+# Tailscale auth key (from Infisical or environment)
+# Generate reusable key at: https://login.tailscale.com/admin/settings/keys
+# Recommended: Create a reusable, pre-authorized key with appropriate tags
+tailscale_auth_key: ""
+
+# Subnet routing - advertise local subnets to Tailscale network
+# This allows remote devices to access internal networks via this node
+tailscale_advertise_routes: []
+# Example:
+#   - "192.168.10.0/24"  # Production VLAN
+#   - "192.168.20.0/24"  # Development VLAN
+#   - "192.168.2.0/24"   # Management network
+
+# Accept routes advertised by other Tailscale nodes
+tailscale_accept_routes: true
+
+# Advertise as exit node (route ALL traffic through this node)
+# Use with caution - this makes this node handle all internet traffic
+tailscale_exit_node: false
+
+# Accept DNS configuration from Tailscale (MagicDNS)
+# Set to false to keep using local DNS (e.g., Pi-hole)
+tailscale_accept_dns: false
+
+# Hostname for this node in Tailscale network
+# This is how the node appears in the Tailscale admin console
+tailscale_hostname: "{{ inventory_hostname }}"
+
+# Tags for ACL policies (optional)
+# Tags must be defined in your Tailscale ACL policy first
+# See: https://tailscale.com/kb/1068/acl-tags
+tailscale_tags: []
+# Example:
+#   - "tag:router"
+#   - "tag:homelab"
+
+# Enable Tailscale SSH (allows SSH via Tailscale without managing keys)
+# See: https://tailscale.com/kb/1193/tailscale-ssh
+tailscale_ssh: true
+
+# Infisical configuration for fetching auth key
+tailscale_infisical_enabled: true
+tailscale_infisical_path: "/infrastructure/vpn/tailscale"
+tailscale_infisical_key_name: "TAILSCALE_AUTH_KEY"
+
+# Force re-authentication (useful for troubleshooting)
+tailscale_force_reauth: false
+
+# Tailscale state directory
+tailscale_state_dir: "/var/lib/tailscale"
+
+# Additional tailscale up flags (advanced)
+tailscale_extra_args: ""

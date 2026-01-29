@@ -1,0 +1,54 @@
+---
+# Default variables for Proxmox network configuration
+
+# Bridge to make VLAN-aware (legacy single bridge mode)
+proxmox_bridge_name: vmbr0
+
+# VLAN range to allow
+proxmox_bridge_vlan_range: "2-4094"
+
+# Physical interface (auto-detected if not specified)
+proxmox_bridge_interface: ""  # Leave empty for auto-detection
+
+# Network configuration for the Proxmox host
+# These are typically set per-host in inventory
+proxmox_host_ip: ""  # e.g., 192.168.2.236
+proxmox_host_netmask: "24"
+proxmox_host_gateway: "192.168.2.1"
+
+# Bridge options
+proxmox_bridge_stp: "off"
+proxmox_bridge_fd: "0"
+
+# Backup existing configuration before changes
+backup_network_config: true
+
+# Restart networking after changes (requires careful planning!)
+restart_networking: false  # Set to true only if you're confident
+
+# Multiple bridges configuration (new)
+# Define multiple bridges with their configurations
+# Example:
+# proxmox_bridges:
+#   - name: vmbr0
+#     type: static
+#     address: 192.168.2.236/24
+#     gateway: 192.168.2.1
+#     ports: eno1
+#     vlan_aware: true
+#     vlan_range: "2-4094"
+#     description: "Management bridge"
+#   - name: vmbr1
+#     type: manual
+#     ports: none
+#     vlan_aware: true
+#     vlan_range: "2-4094"
+#     description: "Internal VLAN bridge"
+#   - name: vmbr2
+#     type: manual
+#     ports: eno2
+#     vlan_aware: true
+#     vlan_range: "2-4094"
+#     description: "Storage bridge"
+
+proxmox_bridges: []

@@ -1,0 +1,8 @@
+# Sudoers configuration for {{ item.name }}
+# Human user with full sudo access (NOPASSWD)
+
+Defaults:{{ item.name }} !requiretty
+Defaults:{{ item.name }} env_keep += "SSH_AUTH_SOCK"
+
+# Full sudo access without password
+{{ item.name }} ALL=(ALL) NOPASSWD: ALL

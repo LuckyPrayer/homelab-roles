@@ -1,0 +1,240 @@
+---
+# Docker Backup Role - Pre-Restore using Komodo Scripts
+# This variant uses the new komodo-restore.sh with per-host B2 paths
+# It's designed to restore data BEFORE containers start
+
+- name: Pre-restore using Komodo scripts
+  when: restore_use_komodo_scripts | default(true)
+  block:
+    - name: Deploy komodo restore scripts for pre-restore
+      block:
+        - name: Create scripts directory
+          ansible.builtin.file:
+            path: /opt/scripts
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Deploy komodo-restore.sh
+          ansible.builtin.copy:
+            src: "{{ role_path }}/../../../scripts/komodo-restore.sh"
+            dest: /opt/scripts/komodo-restore.sh
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Create backup.env file
+          ansible.builtin.copy:
+            content: |
+              # Backblaze B2 Configuration (native restic backend)
+              B2_ACCOUNT_ID={{ backup_b2_account_id }}
+              B2_ACCOUNT_KEY={{ backup_b2_account_key }}
+              B2_BUCKET={{ backup_b2_bucket }}
+              
+              # Restic encryption password
+              RESTIC_PASSWORD={{ backup_restic_password }}
+              
+              # Discord Notifications
+              DISCORD_WEBHOOK_URL={{ backup_discord_webhook | default('') }}
+              
+              # Host identification
+              HOSTNAME_PREFIX={{ inventory_hostname }}
+            dest: /opt/scripts/backup.env
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+
+        - name: Install restic if not present
+          ansible.builtin.shell: |
+            if ! command -v restic &> /dev/null; then
+              curl -L https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 -o /tmp/restic.bz2
+              bunzip2 -f /tmp/restic.bz2
+              mv /tmp/restic /usr/local/bin/restic
+              chmod +x /usr/local/bin/restic
+              echo "changed"
+            else
+              echo "ok"
+            fi
+          register: restic_install_prerestore
+          changed_when: restic_install_prerestore.stdout == "changed"
+
+    - name: Check for available snapshots
+      ansible.builtin.shell: |
+        source /opt/scripts/backup.env
+        export RESTIC_REPOSITORY="b2:${B2_BUCKET}:{{ inventory_hostname }}"
+        export B2_ACCOUNT_ID B2_ACCOUNT_KEY RESTIC_PASSWORD
+        restic snapshots --host "{{ inventory_hostname }}" --json 2>/dev/null || echo "[]"
+      args:
+        executable: /bin/bash
+      register: snapshots_check
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: Parse snapshots
+      ansible.builtin.set_fact:
+        available_snapshots: "{{ snapshots_check.stdout | from_json }}"
+      when: snapshots_check.rc == 0
+
+    - name: Display pre-restore info
+      ansible.builtin.debug:
+        msg:
+          - "╔════════════════════════════════════════════════════════════════╗"
+          - "║          Pre-Deployment Restore (Komodo Scripts)               ║"
+          - "╚════════════════════════════════════════════════════════════════╝"
+          - ""
+          - "🔍 Checking for existing backups for {{ inventory_hostname }}..."
+          - "   Repository: b2:{{ backup_b2_bucket }}:{{ inventory_hostname }}"
+          - "   Snapshots found: {{ available_snapshots | length | default(0) }}"
+
+    - name: Skip restore if no snapshots available
+      ansible.builtin.debug:
+        msg: |
+          ⚠️  No snapshots found for host {{ inventory_hostname }}
+          This is expected for first-time deployments.
+          Fresh containers will be deployed.
+      when: 
+        - available_snapshots is defined
+        - available_snapshots | length == 0
+
+    - name: Pre-restore Harbor data (if snapshots exist)
+      when: 
+        - available_snapshots is defined
+        - available_snapshots | length > 0
+        - inventory_hostname in ['hephaestus-dev', 'hephaestus-prod']
+      block:
+        - name: Display restore plan
+          ansible.builtin.debug:
+            msg:
+              - "🔄 Restoring Harbor data before deployment..."
+              - "   Latest snapshot: {{ available_snapshots[-1].short_id }}"
+              - "   Time: {{ available_snapshots[-1].time }}"
+              - ""
+              - "   Using --data-only mode: containers not started"
+              - "   Harbor will start fresh with restored data"
+
+        - name: Execute Harbor pre-restore
+          ansible.builtin.shell: |
+            /opt/scripts/komodo-restore.sh harbor latest --data-only 2>&1
+          register: harbor_restore_result
+          become: true
+          failed_when: false
+
+        - name: Display restore output
+          ansible.builtin.debug:
+            msg: "{{ harbor_restore_result.stdout_lines | default(['No output']) }}"
+          when: harbor_restore_result.stdout is defined
+
+        - name: Check if restore created harbor data directory
+          ansible.builtin.stat:
+            path: /opt/harbor
+          register: harbor_data_check
+
+        - name: Report restore status
+          ansible.builtin.debug:
+            msg:
+              - "{{ '✅ Harbor data restored successfully!' if harbor_data_check.stat.exists else '⚠️ Harbor data restore may have failed' }}"
+              - "   Data directory exists: {{ harbor_data_check.stat.exists }}"
+          when: harbor_data_check is defined
+
+    - name: Pre-restore Orion stacks (if snapshots exist)
+      when: 
+        - available_snapshots is defined
+        - available_snapshots | length > 0
+        - inventory_hostname in ['orion-dev', 'orion-prod']
+      block:
+        - name: Get list of backed up stacks
+          ansible.builtin.shell: |
+            source /opt/scripts/backup.env
+            export RESTIC_REPOSITORY="b2:${B2_BUCKET}:{{ inventory_hostname }}"
+            export B2_ACCOUNT_ID B2_ACCOUNT_KEY RESTIC_PASSWORD
+            restic snapshots --host "{{ inventory_hostname }}" --json 2>/dev/null | \
+              jq -r '.[] | .tags[]' 2>/dev/null | sort -u | grep -v "all" || echo ""
+          args:
+            executable: /bin/bash
+          register: backed_up_stacks
+          changed_when: false
+          failed_when: false
+          become: true
+
+        - name: Display stacks to restore
+          ansible.builtin.debug:
+            msg:
+              - "🔄 Restoring application stacks before deployment..."
+              - "   Stacks with backups: {{ backed_up_stacks.stdout_lines | join(', ') }}"
+              - ""
+              - "   Using --data-only mode: containers not started"
+
+        - name: Execute stack pre-restore
+          ansible.builtin.shell: |
+            /opt/scripts/komodo-restore.sh {{ item }} latest --data-only 2>&1
+          loop: "{{ backed_up_stacks.stdout_lines }}"
+          register: stack_restore_results
+          become: true
+          failed_when: false
+          when: 
+            - backed_up_stacks.stdout_lines | length > 0
+            - item not in ['komodo', 'traefik']
+
+        - name: Report stack restore status
+          ansible.builtin.debug:
+            msg: "Restored {{ stack_restore_results.results | selectattr('rc', 'defined') | selectattr('rc', 'eq', 0) | list | length }} stacks"
+          when: stack_restore_results is defined
+
+    - name: Pre-restore Komodo MongoDB (argus hosts)
+      when: 
+        - available_snapshots is defined
+        - available_snapshots | length > 0
+        - inventory_hostname in ['argus-dev', 'argus-prod']
+      block:
+        - name: Check if komodo snapshot tag exists
+          ansible.builtin.shell: |
+            source /opt/scripts/backup.env
+            export RESTIC_REPOSITORY="b2:${B2_BUCKET}:{{ inventory_hostname }}"
+            export B2_ACCOUNT_ID B2_ACCOUNT_KEY RESTIC_PASSWORD
+            restic snapshots --host "{{ inventory_hostname }}" --tag komodo --json 2>/dev/null | jq -r 'length' || echo "0"
+          args:
+            executable: /bin/bash
+          register: komodo_snapshot_count
+          changed_when: false
+          failed_when: false
+          become: true
+
+        - name: Display Komodo MongoDB restore plan
+          ansible.builtin.debug:
+            msg:
+              - "🔄 Restoring Komodo MongoDB before deployment..."
+              - "   Snapshots with 'komodo' tag: {{ komodo_snapshot_count.stdout }}"
+              - ""
+              - "   Using --data-only mode: containers not started"
+              - "   Komodo will start fresh with restored MongoDB data"
+          when: komodo_snapshot_count.stdout | int > 0
+
+        - name: Execute Komodo MongoDB pre-restore
+          ansible.builtin.shell: |
+            /opt/scripts/komodo-restore.sh komodo latest --data-only 2>&1
+          register: komodo_restore_result
+          become: true
+          failed_when: false
+          when: komodo_snapshot_count.stdout | int > 0
+
+        - name: Display Komodo restore output
+          ansible.builtin.debug:
+            msg: "{{ komodo_restore_result.stdout_lines | default(['No output']) }}"
+          when: 
+            - komodo_restore_result is defined
+            - komodo_restore_result.stdout is defined
+
+        - name: Check if restore created Komodo data directory
+          ansible.builtin.stat:
+            path: /opt/stacks/komodo/mongo-data
+          register: komodo_data_check
+
+        - name: Report Komodo restore status
+          ansible.builtin.debug:
+            msg:
+              - "{{ '✅ Komodo MongoDB restored successfully!' if komodo_data_check.stat.exists else '⚠️ Komodo MongoDB restore may have failed or no backup exists' }}"
+              - "   Data directory exists: {{ komodo_data_check.stat.exists }}"
+          when: komodo_data_check is defined

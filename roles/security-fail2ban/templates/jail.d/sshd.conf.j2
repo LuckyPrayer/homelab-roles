@@ -1,0 +1,16 @@
+# Fail2ban SSHD Jail Configuration
+# Managed by Ansible - Do not edit manually
+# Host: {{ inventory_hostname }}
+
+[sshd]
+enabled = true
+port = {{ fail2ban_sshd_port }}
+filter = sshd
+logpath = {{ fail2ban_sshd_logpath }}
+maxretry = {{ fail2ban_sshd_maxretry }}
+bantime = {{ fail2ban_sshd_bantime }}
+findtime = {{ fail2ban_sshd_findtime }}
+{% if fail2ban_discord_enabled | default(false) | bool %}
+action = %(action_)s
+         discord-notify
+{% endif %}

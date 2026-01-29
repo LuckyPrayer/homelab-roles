@@ -1,0 +1,75 @@
+---
+- name: Retrieve PROXMOX_TOKEN_ID from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get PROXMOX_TOKEN_ID --path="/users/ansible/proxmox" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env=prod
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  register: proxmox_token_id
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  failed_when: proxmox_token_id.stdout == ""
+
+- name: Retrieve PROXMOX_TOKEN_SECRET from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get PROXMOX_TOKEN_SECRET --path="/users/ansible/proxmox" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env=prod
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  register: proxmox_token_secret
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  failed_when: proxmox_token_secret.stdout == ""
+  no_log: true
+
+- name: Set virtual environment path for proxmoxer
+  ansible.builtin.set_fact:
+    venv_path: "{{ playbook_dir }}/../.venv"
+  delegate_to: localhost
+  run_once: true
+
+- name: Check if virtual environment exists
+  ansible.builtin.stat:
+    path: "{{ venv_path }}/bin/pip"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: venv_check
+
+- name: Create virtual environment if not exists
+  ansible.builtin.command:
+    cmd: python3 -m venv {{ venv_path }}
+    creates: "{{ venv_path }}/bin/activate"
+  delegate_to: localhost
+  run_once: true
+  when: not venv_check.stat.exists
+
+- name: Ensure proxmoxer library is installed on control node
+  ansible.builtin.pip:
+    name:
+      - proxmoxer
+      - requests
+    state: present
+    virtualenv: "{{ venv_path }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Verify cloud_init_templates is defined
+  ansible.builtin.assert:
+    that:
+      - cloud_init_templates is defined
+      - cloud_init_templates | length > 0
+    fail_msg: "cloud_init_templates is not defined or is empty. Please define it in group_vars/all/main.yml"
+    success_msg: "Found {{ cloud_init_templates | length }} template(s) to create"
+  run_once: true
+
+- name: Create cloud-init templates
+  ansible.builtin.include_tasks: template.yml
+  loop: "{{ cloud_init_templates }}"
+  loop_control:
+    loop_var: template_item

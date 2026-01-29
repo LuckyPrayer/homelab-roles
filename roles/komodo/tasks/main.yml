@@ -1,0 +1,1267 @@
+---
+# Komodo Role - Main Tasks
+# Deploys Komodo management platform for Docker orchestration
+#
+# Supports two deployment modes:
+#   - "core": Full stack (Core + MongoDB + Periphery) on management host
+#   - "periphery": Agent-only on monitored hosts
+
+- name: Skip Komodo deployment if disabled
+  ansible.builtin.debug:
+    msg: "Komodo is disabled for this host. Set komodo_mode to 'core' or 'periphery' to deploy."
+  when: komodo_mode | default('disabled') == 'disabled'
+
+- name: Validate komodo_mode
+  ansible.builtin.fail:
+    msg: "Invalid komodo_mode '{{ komodo_mode }}'. Must be 'core', 'periphery', or 'disabled'."
+  when:
+    - komodo_mode | default('disabled') != 'disabled'
+    - komodo_mode not in ['core', 'periphery', 'disabled']
+
+- name: Validate komodo_core_host for periphery mode
+  ansible.builtin.fail:
+    msg: "komodo_core_host must be set when komodo_mode is 'periphery'. Set it to the IP of your Komodo Core host."
+  when:
+    - komodo_mode == 'periphery'
+    - komodo_core_host | default('') == ''
+
+# ============================================================================
+# COMMON SETUP (both core and periphery)
+# ============================================================================
+- name: Common Komodo setup
+  when: komodo_mode in ['core', 'periphery']
+  block:
+    - name: Get docker group GID
+      ansible.builtin.command: getent group docker
+      register: docker_group_info
+      changed_when: false
+
+    - name: Set docker_gid fact
+      ansible.builtin.set_fact:
+        docker_gid: "{{ docker_group_info.stdout.split(':')[2] }}"
+
+    - name: Create Komodo stack directory
+      ansible.builtin.file:
+        path: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+        state: directory
+        owner: docker-svc
+        group: docker
+        mode: '0750'
+
+    - name: Fetch KOMODO_PASSKEY from Infisical
+      ansible.builtin.shell: |
+        infisical secrets get KOMODO_PASSKEY \
+          --path="{{ komodo_infisical_path }}" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: komodo_passkey_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fail if KOMODO_PASSKEY not found
+      ansible.builtin.fail:
+        msg: "KOMODO_PASSKEY not found in Infisical at {{ komodo_infisical_path }}. Please add it first."
+      when: komodo_passkey_result.rc != 0 or komodo_passkey_result.stdout == ''
+
+    - name: Fetch KOMODO_ADMIN_PASSWORD from Infisical (optional)
+      ansible.builtin.shell: |
+        infisical secrets get KOMODO_ADMIN_PASSWORD \
+          --path="{{ komodo_infisical_path }}" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: komodo_admin_password_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Set Komodo admin password fact
+      ansible.builtin.set_fact:
+        komodo_admin_password: "{{ komodo_admin_password_result.stdout if komodo_admin_password_result.rc == 0 and komodo_admin_password_result.stdout != '' else komodo_admin_password | default('changeme') }}"
+      no_log: true
+
+    - name: Set Komodo passkey fact
+      ansible.builtin.set_fact:
+        komodo_passkey: "{{ komodo_passkey_result.stdout }}"
+      no_log: true
+
+    - name: Fetch GITHUB_TOKEN from Infisical for Git operations
+      ansible.builtin.shell: |
+        infisical secrets get GITHUB_TOKEN \
+          --path="/infrastructure/github" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: github_token_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Set GitHub token fact
+      ansible.builtin.set_fact:
+        github_token: "{{ github_token_result.stdout if github_token_result.rc == 0 and github_token_result.stdout != '' else '' }}"
+      no_log: true
+
+    - name: Warn if GITHUB_TOKEN not found
+      ansible.builtin.debug:
+        msg: "⚠️ GITHUB_TOKEN not found in Infisical at /infrastructure/github. Private repos won't be accessible."
+      when: github_token == ''
+
+# ============================================================================
+# SYMLINKS FOR KOMODO STACK ACCESS
+# ============================================================================
+# Komodo expects stacks in /etc/komodo/stacks/ but Ansible deploys to /opt/stacks/
+# Create symlinks so Komodo can find the Ansible-managed compose files
+- name: Create Komodo stacks symlinks
+  when: komodo_mode in ['core', 'periphery']
+  block:
+    - name: Ensure /etc/komodo/stacks directory exists
+      ansible.builtin.file:
+        path: /etc/komodo/stacks
+        state: directory
+        owner: root
+        group: docker
+        mode: '0755'
+
+    - name: Get list of deployed stacks
+      ansible.builtin.find:
+        paths: "{{ stacks_base_dir | default('/opt/stacks') }}"
+        file_type: directory
+        recurse: no
+      register: deployed_stacks
+
+    - name: Create symlinks from /etc/komodo/stacks to /opt/stacks
+      ansible.builtin.file:
+        src: "{{ item.path }}"
+        dest: "/etc/komodo/stacks/{{ item.path | basename }}"
+        state: link
+        force: yes
+      loop: "{{ deployed_stacks.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: item.path | basename != 'komodo'  # Don't symlink komodo itself
+
+    - name: Check if monitoring stack exists at /opt/monitoring
+      ansible.builtin.stat:
+        path: /opt/monitoring/docker-compose.yml
+      register: monitoring_stack_exists
+
+    - name: Create symlink for monitoring stack (/opt/monitoring)
+      ansible.builtin.file:
+        src: /opt/monitoring
+        dest: /etc/komodo/stacks/monitoring
+        state: link
+        force: yes
+      when: monitoring_stack_exists.stat.exists
+
+# ============================================================================
+# CORE DEPLOYMENT (Core + MongoDB + Periphery)
+# ============================================================================
+- name: Deploy Komodo Core stack
+  when: komodo_mode == 'core'
+  block:
+    - name: Create Komodo Core config directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: docker-svc
+        group: docker
+        mode: '0750'
+      loop:
+        - "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/core-config"
+        - "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/periphery-config"
+
+    - name: Create Komodo repos directory for Periphery
+      ansible.builtin.file:
+        path: /etc/komodo/repos
+        state: directory
+        owner: docker-svc
+        group: docker
+        mode: '0755'
+
+    - name: Template Komodo environment file
+      ansible.builtin.template:
+        src: komodo.env.j2
+        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/.env"
+        owner: docker-svc
+        group: docker
+        mode: '0600'
+      no_log: true
+
+    - name: Template Komodo Core docker-compose file
+      ansible.builtin.template:
+        src: docker-compose-core.yml.j2
+        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/docker-compose.yml"
+        owner: docker-svc
+        group: docker
+        mode: '0640'
+
+    - name: Template Komodo core configuration
+      ansible.builtin.template:
+        src: core.config.toml.j2
+        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/core-config/config.toml"
+        owner: docker-svc
+        group: docker
+        mode: '0640'
+
+    - name: Template Komodo periphery configuration (local agent)
+      ansible.builtin.template:
+        src: periphery.config.toml.j2
+        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/periphery-config/config.toml"
+        owner: docker-svc
+        group: docker
+        mode: '0640'
+
+    - name: Pull Komodo Core images
+      ansible.builtin.command:
+        cmd: docker compose pull
+        chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+      changed_when: true
+
+    - name: Start Komodo Core stack
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+      changed_when: true
+
+    - name: Wait for Komodo Core to be healthy
+      ansible.builtin.uri:
+        url: "http://localhost:9120/auth"
+        method: POST
+        body_format: json
+        body:
+          type: "GetLoginOptions"
+          params: {}
+        status_code: 200
+      register: komodo_health
+      until: komodo_health.status == 200
+      retries: 30
+      delay: 5
+      ignore_errors: true
+
+    # ========================================================================
+    # AUTO-RESTORE MONGODB FROM BACKUP (if backup file exists)
+    # This handles disaster recovery - restore script places .archive file
+    # in the data directory, and we restore it automatically here
+    # ========================================================================
+    - name: Check for MongoDB backup file to restore
+      ansible.builtin.find:
+        paths: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+        patterns: "*_mongo_*.archive"
+      register: mongo_backup_files
+
+    - name: Restore MongoDB from backup
+      when: mongo_backup_files.matched > 0
+      block:
+        - name: Display MongoDB restore status
+          ansible.builtin.debug:
+            msg: "🔄 Found MongoDB backup file: {{ mongo_backup_files.files[0].path | basename }}. Restoring..."
+
+        - name: Wait for MongoDB to be ready
+          ansible.builtin.command:
+            cmd: docker compose exec -T komodo-mongo mongo --eval "db.adminCommand('ping')"
+            chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+          register: mongo_ready
+          until: mongo_ready.rc == 0
+          retries: 15
+          delay: 2
+          changed_when: false
+
+        - name: Restore MongoDB database from backup
+          ansible.builtin.shell: |
+            cd {{ stacks_base_dir | default('/opt/stacks') }}/komodo
+            cat "{{ mongo_backup_files.files[0].path }}" | docker compose exec -T komodo-mongo mongorestore --archive --drop
+          register: mongo_restore
+          changed_when: true
+
+        - name: Remove MongoDB backup file after successful restore
+          ansible.builtin.file:
+            path: "{{ mongo_backup_files.files[0].path }}"
+            state: absent
+          when: mongo_restore.rc == 0
+
+        - name: Display MongoDB restore result
+          ansible.builtin.debug:
+            msg: "{{ '✓ MongoDB restored successfully from backup!' if mongo_restore.rc == 0 else '✗ MongoDB restore failed!' }}"
+
+        - name: Restart Komodo Core after MongoDB restore
+          ansible.builtin.command:
+            cmd: docker compose restart komodo-core
+            chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+          when: mongo_restore.rc == 0
+          changed_when: true
+
+        - name: Wait for Komodo Core to be healthy after restore
+          ansible.builtin.uri:
+            url: "http://localhost:9120/auth"
+            method: POST
+            body_format: json
+            body:
+              type: "GetLoginOptions"
+              params: {}
+            status_code: 200
+          register: komodo_health_after_restore
+          until: komodo_health_after_restore.status == 200
+          retries: 30
+          delay: 5
+          when: mongo_restore.rc == 0
+
+    # ========================================================================
+    # AUTO-CREATE ADMIN USER VIA AUTH API
+    # CreateLocalUser creates first user as admin automatically
+    # MUST happen before ResourceSync creates procedures/tags!
+    # Skip if we just restored from backup (users already exist)
+    # ========================================================================
+    - name: Check if admin user already exists
+      ansible.builtin.uri:
+        url: "http://localhost:9120/auth"
+        method: POST
+        body_format: json
+        body:
+          type: "LoginLocalUser"
+          params:
+            username: "{{ komodo_admin_username | default('admin') }}"
+            password: "{{ komodo_admin_password | default('changeme') }}"
+        status_code: [200, 201, 401, 403]
+        return_content: true
+      register: komodo_login_check
+      retries: 3
+      delay: 2
+
+    - name: Create admin user (first user becomes super admin)
+      ansible.builtin.uri:
+        url: "http://localhost:9120/auth"
+        method: POST
+        body_format: json
+        body:
+          type: "CreateLocalUser"
+          params:
+            username: "{{ komodo_admin_username | default('admin') }}"
+            password: "{{ komodo_admin_password | default('changeme') }}"
+        status_code: [200, 201]
+        return_content: true
+      register: komodo_signup
+      retries: 3
+      delay: 2
+      until: komodo_signup.status in [200, 201]
+      when: komodo_login_check.status != 200
+
+    - name: Display signup result
+      ansible.builtin.debug:
+        msg: "{{ '✓ Admin user created successfully!' if (komodo_signup is defined and komodo_signup is not skipped and komodo_signup is succeeded) else '⏭ Admin user already exists (skipped)' }}"
+
+    # ========================================================================
+    # AUTO-REGISTER PERIPHERY SERVERS VIA API
+    # Only creates servers if they don't already exist (idempotent)
+    # Servers are detected from inventory based on komodo_mode: periphery
+    # Or can be manually defined via komodo_periphery_servers variable
+    # ========================================================================
+    - name: Build periphery servers list from inventory
+      ansible.builtin.set_fact:
+        komodo_periphery_servers: |
+          {% set servers = [] %}
+          {% for host in groups['docker_hosts'] | default([]) %}
+          {% if hostvars[host].komodo_mode | default('disabled') == 'periphery' %}
+          {% set _ = servers.append({
+            'name': host,
+            'address': hostvars[host].ansible_host,
+            'port': hostvars[host].komodo_periphery_port | default(8120)
+          }) %}
+          {% endif %}
+          {% endfor %}
+          {{ servers | to_json }}
+      when: komodo_periphery_servers | default([]) | length == 0
+
+    - name: Parse periphery servers JSON
+      ansible.builtin.set_fact:
+        komodo_periphery_servers: "{{ komodo_periphery_servers | from_json if komodo_periphery_servers is string else komodo_periphery_servers }}"
+      when: komodo_periphery_servers is string
+
+    - name: Display periphery servers to register
+      ansible.builtin.debug:
+        msg: "Periphery servers to register: {{ komodo_periphery_servers | default([]) | map(attribute='name') | list | default(['none']) }}"
+
+    - name: Log in to Komodo to get JWT for server registration
+      ansible.builtin.uri:
+        url: "http://localhost:9120/auth"
+        method: POST
+        body_format: json
+        body:
+          type: "LoginLocalUser"
+          params:
+            username: "{{ komodo_admin_username | default('admin') }}"
+            password: "{{ komodo_admin_password | default('changeme') }}"
+        status_code: [200, 201]
+        return_content: true
+      register: komodo_login_servers
+      retries: 5
+      delay: 3
+      until: komodo_login_servers.status in [200, 201]
+      when: komodo_periphery_servers | default([]) | length > 0
+
+    - name: Get list of existing servers
+      ansible.builtin.uri:
+        url: "http://localhost:9120/read"
+        method: POST
+        body_format: json
+        body:
+          type: "ListServers"
+          params: {}
+        headers:
+          Authorization: "{{ komodo_login_servers.json.jwt }}"
+        status_code: [200]
+        return_content: true
+      register: komodo_existing_servers
+      when:
+        - komodo_periphery_servers | default([]) | length > 0
+        - komodo_login_servers is succeeded
+
+    - name: Build list of existing server names
+      ansible.builtin.set_fact:
+        existing_server_names: "{{ komodo_existing_servers.json | map(attribute='name') | list }}"
+      when:
+        - komodo_existing_servers is defined
+        - komodo_existing_servers is succeeded
+
+    - name: Register periphery servers
+      ansible.builtin.uri:
+        url: "http://localhost:9120/write"
+        method: POST
+        body_format: json
+        body:
+          type: "CreateServer"
+          params:
+            name: "{{ item.name }}"
+            config:
+              address: "http://{{ item.address }}:{{ item.port | default(8120) }}"
+              enabled: true
+        headers:
+          Authorization: "{{ komodo_login_servers.json.jwt }}"
+        status_code: [200, 201]
+        return_content: true
+      loop: "{{ komodo_periphery_servers | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - komodo_periphery_servers | default([]) | length > 0
+        - komodo_login_servers is defined
+        - komodo_login_servers is succeeded
+        - item.name not in (existing_server_names | default([]))
+      register: komodo_server_registration
+
+    - name: Display server registration results
+      ansible.builtin.debug:
+        msg: |
+          Periphery Server Registration:
+          {% for server in komodo_periphery_servers | default([]) %}
+          - {{ server.name }}: {{ '✓ Registered' if server.name not in (existing_server_names | default([])) else '⏭ Already exists (skipped)' }}
+          {% endfor %}
+      when:
+        - komodo_periphery_servers | default([]) | length > 0
+        - komodo_login_servers is defined
+        - komodo_login_servers is succeeded
+
+    # ========================================================================
+    # AUTO-CREATE RESOURCESYNC VIA API
+    # ========================================================================
+    - name: Log in to Komodo to get JWT
+      ansible.builtin.uri:
+        url: "http://localhost:9120/auth"
+        method: POST
+        body_format: json
+        body:
+          type: "LoginLocalUser"
+          params:
+            username: "{{ komodo_admin_username | default('admin') }}"
+            password: "{{ komodo_admin_password | default('changeme') }}"
+        status_code: [200, 201]
+        return_content: true
+      register: komodo_login
+      retries: 5
+      delay: 3
+      until: komodo_login.status in [200, 201]
+      ignore_errors: true
+
+    - name: Check if ResourceSync already exists
+      ansible.builtin.uri:
+        url: "http://localhost:9120/read"
+        method: POST
+        body_format: json
+        body:
+          type: "GetResourceSync"
+          params:
+            sync: "homelab"
+        headers:
+          Authorization: "{{ komodo_login.json.jwt }}"
+        status_code: [200, 400, 404]
+        return_content: true
+      register: komodo_sync_check
+      when: komodo_login is succeeded and komodo_login.json.jwt is defined
+      ignore_errors: true
+
+    - name: Create ResourceSync for homelab resources
+      ansible.builtin.uri:
+        url: "http://localhost:9120/write"
+        method: POST
+        body_format: json
+        body:
+          type: "CreateResourceSync"
+          params:
+            name: "homelab"
+            config:
+              files_on_host: true
+              resource_path:
+                - "homelab.toml"
+              managed: true
+              delete: false
+        headers:
+          Authorization: "{{ komodo_login.json.jwt }}"
+        status_code: [200, 201]
+        return_content: true
+      register: komodo_sync_create
+      when:
+        - komodo_login is succeeded
+        - komodo_login.json.jwt is defined
+        - komodo_sync_check is failed or komodo_sync_check.status != 200
+      ignore_errors: true
+
+    - name: Run ResourceSync to import resources
+      ansible.builtin.uri:
+        url: "http://localhost:9120/execute"
+        method: POST
+        body_format: json
+        body:
+          type: "RunSync"
+          params:
+            sync: "homelab"
+        headers:
+          Authorization: "{{ komodo_login.json.jwt }}"
+        status_code: [200, 201, 202]
+        return_content: true
+      register: komodo_sync_run
+      when:
+        - komodo_login is succeeded
+        - komodo_login.json.jwt is defined
+      retries: 3
+      delay: 5
+      until: komodo_sync_run is succeeded
+      ignore_errors: true
+
+    - name: Display ResourceSync status
+      ansible.builtin.debug:
+        msg:
+          - "{{ '✓ ResourceSync created successfully!' if komodo_sync_create is succeeded else '⚠ ResourceSync may already exist or creation skipped' }}"
+          - "{{ '✓ ResourceSync executed successfully!' if komodo_sync_run is succeeded else '⚠ ResourceSync execution skipped or failed' }}"
+      when: komodo_login is succeeded
+
+    # ========================================================================
+    # AUTO-DEPLOY ALL STACKS VIA KOMODO PROCEDURE
+    # ========================================================================
+    - name: Wait for ResourceSync to complete processing
+      ansible.builtin.pause:
+        seconds: 10
+      when:
+        - komodo_sync_run is succeeded
+        - komodo_auto_deploy | default(true)
+
+    - name: Run deploy-all procedure to start all stacks
+      ansible.builtin.uri:
+        url: "http://localhost:9120/execute"
+        method: POST
+        body_format: json
+        body:
+          type: "RunProcedure"
+          params:
+            procedure: "deploy-all-{{ env | default('dev') }}"
+        headers:
+          Authorization: "{{ komodo_login.json.jwt }}"
+        status_code: [200, 201, 202]
+        return_content: true
+      register: komodo_deploy_all
+      when:
+        - komodo_login is succeeded
+        - komodo_login.json.jwt is defined
+        - komodo_sync_run is succeeded
+        - komodo_auto_deploy | default(true)
+      retries: 3
+      delay: 10
+      until: komodo_deploy_all is succeeded
+      ignore_errors: true
+
+    - name: Display deployment procedure status
+      ansible.builtin.debug:
+        msg:
+          - "{{ '✓ deploy-all-' + (env | default('dev')) + ' procedure triggered!' if komodo_deploy_all is succeeded else '⚠ Deployment procedure failed or skipped' }}"
+          - "  Note: Stacks are deploying in background. Harbor may take 2-3 minutes to start."
+          - "  Monitor progress at: https://komodo.{{ env | default('dev') }}.thebozic.com"
+      when:
+        - komodo_login is succeeded
+        - komodo_auto_deploy | default(true)
+
+    # ========================================================================
+    # AUTO-RESTORE HARBOR FROM B2 BACKUP
+    # ========================================================================
+    - name: Wait for Harbor deployment to complete before restore
+      ansible.builtin.pause:
+        seconds: 120
+        prompt: "Waiting for Harbor to fully deploy before restoring data..."
+      when:
+        - komodo_deploy_all is succeeded
+        - komodo_auto_restore | default(false)
+
+    - name: Run restore-harbor procedure to recover data from B2
+      ansible.builtin.uri:
+        url: "http://localhost:9120/execute"
+        method: POST
+        body_format: json
+        body:
+          type: "RunProcedure"
+          params:
+            procedure: "restore-harbor-{{ env | default('dev') }}"
+        headers:
+          Authorization: "{{ komodo_login.json.jwt }}"
+        status_code: [200, 201, 202]
+        return_content: true
+      register: komodo_restore_harbor
+      when:
+        - komodo_login is succeeded
+        - komodo_login.json.jwt is defined
+        - komodo_deploy_all is succeeded
+        - komodo_auto_restore | default(false)
+      retries: 3
+      delay: 10
+      until: komodo_restore_harbor is succeeded
+      ignore_errors: true
+
+    - name: Wait for Harbor restore procedure to complete
+      ansible.builtin.pause:
+        seconds: 300
+        prompt: "Waiting for Harbor restore from B2 to complete (downloading ~1GB)..."
+      when:
+        - komodo_restore_harbor is succeeded
+        - komodo_auto_restore | default(false)
+
+    - name: Display Harbor restore status
+      ansible.builtin.debug:
+        msg:
+          - "{{ '✓ restore-harbor-' + (env | default('dev')) + ' procedure triggered!' if komodo_restore_harbor is succeeded else '⚠ Harbor restore skipped or failed' }}"
+          - "  Harbor data is being restored from B2 backup."
+          - "  This includes projects, repositories, and container images."
+      when:
+        - komodo_login is succeeded
+        - komodo_auto_restore | default(false)
+
+    # ========================================================================
+    # AUTO-DEPLOY MINECRAFT STACKS AFTER HARBOR RESTORE
+    # ========================================================================
+    - name: Run deploy-minecraft procedure to start Minecraft stacks
+      ansible.builtin.uri:
+        url: "http://localhost:9120/execute"
+        method: POST
+        body_format: json
+        body:
+          type: "RunProcedure"
+          params:
+            procedure: "deploy-minecraft-{{ env | default('dev') }}"
+        headers:
+          Authorization: "{{ komodo_login.json.jwt }}"
+        status_code: [200, 201, 202]
+        return_content: true
+      register: komodo_deploy_minecraft
+      when:
+        - komodo_login is succeeded
+        - komodo_login.json.jwt is defined
+        - komodo_restore_harbor is succeeded or not (komodo_auto_restore | default(false))
+        - komodo_auto_deploy_minecraft | default(false)
+      retries: 3
+      delay: 10
+      until: komodo_deploy_minecraft is succeeded
+      ignore_errors: true
+
+    - name: Display Minecraft deployment status
+      ansible.builtin.debug:
+        msg:
+          - "{{ '✓ deploy-minecraft-' + (env | default('dev')) + ' procedure triggered!' if komodo_deploy_minecraft is succeeded else '⚠ Minecraft deployment skipped or failed' }}"
+          - "  Minecraft stacks are being deployed from Harbor images."
+      when:
+        - komodo_login is succeeded
+        - komodo_auto_deploy_minecraft | default(false)
+
+    # ========================================================================
+    # AUTO-RESTORE MINECRAFT WORLD DATA FROM B2 BACKUP
+    # ========================================================================
+    - name: Wait for Minecraft containers to be ready before restore
+      ansible.builtin.pause:
+        seconds: 60
+        prompt: "Waiting for Minecraft containers to initialize before restoring world data..."
+      when:
+        - komodo_deploy_minecraft is succeeded
+        - komodo_auto_restore_minecraft | default(false)
+
+    - name: Run restore-minecraft procedure to recover world data from B2
+      ansible.builtin.uri:
+        url: "http://localhost:9120/execute"
+        method: POST
+        body_format: json
+        body:
+          type: "RunProcedure"
+          params:
+            procedure: "restore-minecraft-{{ env | default('dev') }}"
+        headers:
+          Authorization: "{{ komodo_login.json.jwt }}"
+        status_code: [200, 201, 202]
+        return_content: true
+      register: komodo_restore_minecraft
+      when:
+        - komodo_login is succeeded
+        - komodo_login.json.jwt is defined
+        - komodo_deploy_minecraft is succeeded or not (komodo_auto_deploy_minecraft | default(false))
+        - komodo_auto_restore_minecraft | default(false)
+      retries: 3
+      delay: 10
+      until: komodo_restore_minecraft is succeeded
+      ignore_errors: true
+
+    - name: Display Minecraft restore status
+      ansible.builtin.debug:
+        msg:
+          - "{{ '✓ restore-minecraft-' + (env | default('dev')) + ' procedure triggered!' if komodo_restore_minecraft is succeeded else '⚠ Minecraft restore skipped or failed' }}"
+          - "  Minecraft world data is being restored from B2 backup."
+      when:
+        - komodo_login is succeeded
+        - komodo_auto_restore_minecraft | default(false)
+
+    - name: Create Komodo resource sync directory
+      ansible.builtin.file:
+        path: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/resources/homelab"
+        state: directory
+        owner: docker-svc
+        group: docker
+        mode: '0750'
+
+    - name: Template Komodo resource sync configuration
+      ansible.builtin.template:
+        src: komodo-resources.toml.j2
+        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/resources/homelab/homelab.toml"
+        owner: docker-svc
+        group: docker
+        mode: '0640'
+      register: komodo_resources_config
+
+    - name: Create backup scripts directory (Core)
+      ansible.builtin.file:
+        path: /opt/scripts
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy Komodo backup script (Core)
+      ansible.builtin.copy:
+        src: "{{ role_path }}/../../../scripts/komodo-backup.sh"
+        dest: /opt/scripts/komodo-backup.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy Komodo restore script (Core)
+      ansible.builtin.copy:
+        src: "{{ role_path }}/../../../scripts/komodo-restore.sh"
+        dest: /opt/scripts/komodo-restore.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install restic for B2 backups (Core)
+      ansible.builtin.shell: |
+        if ! command -v restic &> /dev/null; then
+          curl -L https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 -o /tmp/restic.bz2
+          bunzip2 -f /tmp/restic.bz2
+          mv /tmp/restic /usr/local/bin/restic
+          chmod +x /usr/local/bin/restic
+          echo "changed"
+        else
+          echo "ok"
+        fi
+      register: restic_install_core
+      changed_when: restic_install_core.stdout == "changed"
+
+    - name: Install yq for config-driven backups (Core)
+      ansible.builtin.shell: |
+        if ! command -v yq &> /dev/null; then
+          curl -L https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          echo "changed"
+        else
+          echo "ok"
+        fi
+      register: yq_install_core
+      changed_when: yq_install_core.stdout == "changed"
+
+    # Fetch B2 backup credentials from Infisical
+    - name: Fetch B2_ACCOUNT_ID from Infisical (Core)
+      ansible.builtin.shell: |
+        infisical secrets get B2_ACCOUNT_ID \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: b2_account_id_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch B2_ACCOUNT_KEY from Infisical (Core)
+      ansible.builtin.shell: |
+        infisical secrets get B2_ACCOUNT_KEY \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: b2_account_key_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch B2_BUCKET from Infisical (Core)
+      ansible.builtin.shell: |
+        infisical secrets get B2_BUCKET \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: b2_bucket_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch DISCORD_WEBHOOK_URL from Infisical (Core)
+      ansible.builtin.shell: |
+        infisical secrets get DISCORD_WEBHOOK_URL \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: discord_webhook_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch RESTIC_PASSWORD from Infisical (Core)
+      ansible.builtin.shell: |
+        infisical secrets get RESTIC_PASSWORD \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: restic_password_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Create backup environment file (Core)
+      ansible.builtin.copy:
+        content: |
+          # Backblaze B2 Configuration (native restic backend)
+          B2_ACCOUNT_ID={{ b2_account_id_result.stdout | default('') }}
+          B2_ACCOUNT_KEY={{ b2_account_key_result.stdout | default('') }}
+          B2_BUCKET={{ b2_bucket_result.stdout | default('') }}
+          
+          # Restic encryption password
+          RESTIC_PASSWORD={{ restic_password_result.stdout | default('') }}
+          
+          # Discord Notifications
+          DISCORD_WEBHOOK_URL={{ discord_webhook_result.stdout | default('') }}
+          
+          # Host identification
+          HOSTNAME_PREFIX={{ inventory_hostname }}
+        dest: /opt/scripts/backup.env
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      when: b2_account_id_result.rc == 0 and b2_account_id_result.stdout != ''
+
+    - name: Create backup storage directory (Core)
+      ansible.builtin.file:
+        path: /opt/backups
+        state: directory
+        owner: docker-svc
+        group: docker
+        mode: '0755'
+
+    # Deploy systemd timer for automated backups
+    - name: Deploy backup systemd service (Core)
+      ansible.builtin.template:
+        src: homelab-backup.service.j2
+        dest: /etc/systemd/system/homelab-backup.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload systemd
+
+    - name: Deploy backup systemd timer (Core)
+      ansible.builtin.template:
+        src: homelab-backup.timer.j2
+        dest: /etc/systemd/system/homelab-backup.timer
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload systemd
+
+    - name: Enable and start backup timer (Core)
+      ansible.builtin.systemd:
+        name: homelab-backup.timer
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Display Komodo Core deployment status
+      ansible.builtin.debug:
+        msg:
+          - "✓ Komodo Core deployed successfully!"
+          - "  - Web UI: {{ komodo_host }}"
+          - "  - Direct: http://{{ ansible_host }}:9120"
+          - "  - Local Periphery: http://{{ ansible_host }}:{{ komodo_periphery_port }}"
+          - "  - Stack Location: {{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+          - ""
+          - "📋 ResourceSync Status:"
+          - "  {{ '✓ ResourceSync homelab created automatically' if (komodo_sync_create is defined and komodo_sync_create is succeeded) else '⚠ ResourceSync needs manual setup (see below)' }}"
+          - "  {{ '✓ ResourceSync executed - resources imported' if (komodo_sync_run is defined and komodo_sync_run is succeeded) else '' }}"
+          - ""
+          - "🚀 Available Procedures:"
+          - "  - deploy-all-{{ env | default('dev') }}: Deploy all stacks in order"
+          - "  - restart-all-{{ env | default('dev') }}: Restart all stacks"
+          - "  - deploy-minecraft-{{ env | default('dev') }}: Deploy Minecraft stacks"
+          - ""
+          - "💾 Automated Backups (via systemd timer):"
+          - "  - Timer: homelab-backup.timer (runs at 3 AM daily)"
+          - "  - Check status: systemctl status homelab-backup.timer"
+          - "  - Manual run: sudo /opt/scripts/komodo-backup.sh all full"
+          - ""
+          - "📝 Manual Setup (if auto-setup failed):"
+          - "  1. Go to Syncs → Create ResourceSync"
+          - "  2. Name: homelab"
+          - "  3. Select 'Files On Server' mode"
+          - "  4. Resource Path: homelab.toml"
+          - "  5. Execute Sync"
+
+# ============================================================================
+# PERIPHERY-ONLY DEPLOYMENT (Agent only)
+# ============================================================================
+- name: Deploy Komodo Periphery agent
+  when: komodo_mode == 'periphery'
+  block:
+    - name: Create Komodo Periphery config directory
+      ansible.builtin.file:
+        path: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/periphery-config"
+        state: directory
+        owner: docker-svc
+        group: docker
+        mode: '0750'
+
+    - name: Create Komodo Periphery .env file
+      ansible.builtin.copy:
+        content: |
+          # Komodo secrets from Infisical
+          KOMODO_PASSKEY={{ komodo_passkey }}
+        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/.env"
+        owner: docker-svc
+        group: docker
+        mode: '0600'
+      no_log: true
+
+    - name: Template Komodo Periphery docker-compose file
+      ansible.builtin.template:
+        src: docker-compose-periphery.yml.j2
+        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/docker-compose.yml"
+        owner: docker-svc
+        group: docker
+        mode: '0640'
+
+    - name: Template Komodo periphery configuration
+      ansible.builtin.template:
+        src: periphery.config.toml.j2
+        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/periphery-config/config.toml"
+        owner: docker-svc
+        group: docker
+        mode: '0640'
+
+    - name: Create backup scripts directory
+      ansible.builtin.file:
+        path: /opt/scripts
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy Komodo backup script
+      ansible.builtin.copy:
+        src: "{{ role_path }}/../../../scripts/komodo-backup.sh"
+        dest: /opt/scripts/komodo-backup.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy Komodo restore script
+      ansible.builtin.copy:
+        src: "{{ role_path }}/../../../scripts/komodo-restore.sh"
+        dest: /opt/scripts/komodo-restore.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install restic for B2 backups (Periphery)
+      ansible.builtin.shell: |
+        if ! command -v restic &> /dev/null; then
+          curl -L https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 -o /tmp/restic.bz2
+          bunzip2 -f /tmp/restic.bz2
+          mv /tmp/restic /usr/local/bin/restic
+          chmod +x /usr/local/bin/restic
+          echo "changed"
+        else
+          echo "ok"
+        fi
+      register: restic_install_periphery
+      changed_when: restic_install_periphery.stdout == "changed"
+
+    - name: Install yq for config-driven backups (Periphery)
+      ansible.builtin.shell: |
+        if ! command -v yq &> /dev/null; then
+          curl -L https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          echo "changed"
+        else
+          echo "ok"
+        fi
+      register: yq_install_periphery
+      changed_when: yq_install_periphery.stdout == "changed"
+
+    # Fetch B2 backup credentials from Infisical
+    - name: Fetch B2_ACCOUNT_ID from Infisical (Periphery)
+      ansible.builtin.shell: |
+        infisical secrets get B2_ACCOUNT_ID \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: b2_account_id_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch B2_ACCOUNT_KEY from Infisical (Periphery)
+      ansible.builtin.shell: |
+        infisical secrets get B2_ACCOUNT_KEY \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: b2_account_key_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch B2_BUCKET from Infisical (Periphery)
+      ansible.builtin.shell: |
+        infisical secrets get B2_BUCKET \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: b2_bucket_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch DISCORD_WEBHOOK_URL from Infisical (Periphery)
+      ansible.builtin.shell: |
+        infisical secrets get DISCORD_WEBHOOK_URL \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: discord_webhook_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch RESTIC_PASSWORD from Infisical (Periphery)
+      ansible.builtin.shell: |
+        infisical secrets get RESTIC_PASSWORD \
+          --path="/infrastructure/backup" \
+          --env="{{ infisical_env_slug }}" \
+          --projectId="{{ infisical_project_id }}" \
+          --plain --silent
+      register: restic_password_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      failed_when: false
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Create backup environment file (Periphery)
+      ansible.builtin.copy:
+        content: |
+          # Backblaze B2 Configuration (native restic backend)
+          B2_ACCOUNT_ID={{ b2_account_id_result.stdout | default('') }}
+          B2_ACCOUNT_KEY={{ b2_account_key_result.stdout | default('') }}
+          B2_BUCKET={{ b2_bucket_result.stdout | default('') }}
+          
+          # Restic encryption password
+          RESTIC_PASSWORD={{ restic_password_result.stdout | default('') }}
+          
+          # Discord Notifications
+          DISCORD_WEBHOOK_URL={{ discord_webhook_result.stdout | default('') }}
+          
+          # Host identification
+          HOSTNAME_PREFIX={{ inventory_hostname }}
+        dest: /opt/scripts/backup.env
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      when: b2_account_id_result.rc == 0 and b2_account_id_result.stdout != ''
+
+    - name: Create backup storage directory
+      ansible.builtin.file:
+        path: /opt/backups
+        state: directory
+        owner: docker-svc
+        group: docker
+        mode: '0755'
+
+    # Deploy systemd timer for automated backups
+    - name: Deploy backup systemd service (Periphery)
+      ansible.builtin.template:
+        src: homelab-backup.service.j2
+        dest: /etc/systemd/system/homelab-backup.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload systemd
+
+    - name: Deploy backup systemd timer (Periphery)
+      ansible.builtin.template:
+        src: homelab-backup.timer.j2
+        dest: /etc/systemd/system/homelab-backup.timer
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload systemd
+
+    - name: Enable and start backup timer (Periphery)
+      ansible.builtin.systemd:
+        name: homelab-backup.timer
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Pull Komodo Periphery image
+      ansible.builtin.command:
+        cmd: docker compose pull
+        chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+      changed_when: true
+
+    - name: Start Komodo Periphery agent
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+      changed_when: true
+
+    - name: Wait for Komodo Periphery port to be available
+      ansible.builtin.wait_for:
+        host: localhost
+        port: "{{ komodo_periphery_port }}"
+        state: started
+        timeout: 60
+      register: periphery_port_check
+
+    - name: Verify Komodo Periphery container is running
+      ansible.builtin.command:
+        cmd: docker ps --filter name=komodo-periphery --format '{{ "{{" }}.Status{{ "}}" }}'
+      register: periphery_container_status
+      changed_when: false
+      failed_when: "'Up' not in periphery_container_status.stdout"
+
+    - name: Display Komodo Periphery deployment status
+      ansible.builtin.debug:
+        msg:
+          - "✓ Komodo Periphery agent deployed!"
+          - "  - Host: {{ inventory_hostname }}"
+          - "  - Agent Port: {{ komodo_periphery_port }}"
+          - "  - Core Server: {{ komodo_core_host }}"
+          - "  - Stack Location: {{ stacks_base_dir | default('/opt/stacks') }}/komodo"
+          - ""
+          - "💾 Automated Backups (via systemd timer):"
+          - "  - Timer: homelab-backup.timer (runs at 3 AM daily)"
+          - "  - Check status: systemctl status homelab-backup.timer"
+          - "  - Manual run: sudo /opt/scripts/komodo-backup.sh all full"
+          - ""
+          - "⚠️  Remember to add this server in Komodo Core UI:"
+          - "     Address: {{ ansible_host }}:{{ komodo_periphery_port }}"
+

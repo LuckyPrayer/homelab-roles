@@ -1,0 +1,311 @@
+version: "3.9"
+
+x-traefik-labels: &traefik_labels
+  - "traefik.enable=true"
+  - "traefik.http.routers.{{ hostvars[inventory_hostname].env }}-redirect.rule=HostRegexp(`{host:.+}`)"
+  - "traefik.http.routers.{{ hostvars[inventory_hostname].env }}-redirect.entrypoints=web"
+  - "traefik.http.routers.{{ hostvars[inventory_hostname].env }}-redirect.middlewares=redirect-to-https"
+
+services:
+{% set host = hostvars[inventory_hostname].inventory_hostname | default(inventory_hostname) %}
+{% if host in ['orion-dev', 'orion-prod'] %}
+  traefik:
+    image: traefik:2.11
+    container_name: traefik
+    user: "65534:{{ docker_gid | default('docker') }}"  # Run as nobody with docker group access
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --certificatesresolvers.mytls.acme.dnschallenge=true
+      - --certificatesresolvers.mytls.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.mytls.acme.email={{ traefik_email }}
+      - --certificatesresolvers.mytls.acme.storage=/letsencrypt/acme.json
+      - --providers.file.filename=/dynamic/dynamic.yml
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/acme.json:/letsencrypt/acme.json
+      - ./traefik/dynamic.yml:/dynamic/dynamic.yml
+    environment:
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - DAC_OVERRIDE  # Needed to write acme.json
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`traefik.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.service=api@internal"
+      - "traefik.http.routers.api.tls=true"
+
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v1.4.0
+    container_name: mealie
+    user: "3002:3002"  # Run as docker-svc user
+    depends_on:
+      - traefik
+    environment:
+      - ALLOW_SIGNUP=false
+      - PUID=3002
+      - PGID=3002
+      - TZ=UTC
+      - DB_ENGINE=sqlite
+    volumes:
+      - ./mealie:/app/data
+    ports:
+      - "9000:9000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mealie.rule=Host(`mealie.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}`)"
+      - "traefik.http.routers.mealie.entrypoints=websecure"
+      - "traefik.http.routers.mealie.tls.certresolver=mytls"
+      - "traefik.http.services.mealie.loadbalancer.server.port=9000"
+    restart: unless-stopped
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.122.2
+    container_name: n8n
+    user: "3002:3002"  # Run as docker-svc user
+    depends_on:
+      - traefik
+    environment:
+      - WEBHOOK_URL=https://n8n.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}
+      - N8N_HOST=n8n.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}
+      - N8N_PROTOCOL=https
+      - GENERIC_TIMEZONE=UTC
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - N8N_USER_FOLDER=/data/.n8n  # Set n8n data folder for non-root user
+    volumes:
+      - ./n8n:/data/.n8n
+    ports:
+      - "5678:5678"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`n8n.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls.certresolver=mytls"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+    restart: unless-stopped
+
+  vaultwarden:
+    image: vaultwarden/server:1.32.7-alpine
+    container_name: vaultwarden
+    user: "3002:3002"  # Run as docker-svc user
+    depends_on:
+      - traefik
+    environment:
+      - DOMAIN=https://vaultwarden.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}
+      - SIGNUPS_ALLOWED={{ vaultwarden_signups_allowed | default('false') }}
+      - INVITATIONS_ALLOWED={{ vaultwarden_invitations_allowed | default('true') }}
+      - SHOW_PASSWORD_HINT={{ vaultwarden_show_password_hint | default('false') }}
+      - ADMIN_TOKEN=${VAULTWARDEN_ADMIN_TOKEN}
+{% if vaultwarden_smtp_host is defined and vaultwarden_smtp_host != '' %}
+      - SMTP_HOST={{ vaultwarden_smtp_host }}
+      - SMTP_FROM={{ vaultwarden_smtp_from }}
+      - SMTP_PORT={{ vaultwarden_smtp_port | default('587') }}
+      - SMTP_SECURITY={{ vaultwarden_smtp_security | default('starttls') }}
+      - SMTP_USERNAME=${VAULTWARDEN_SMTP_USERNAME}
+      - SMTP_PASSWORD=${VAULTWARDEN_SMTP_PASSWORD}
+{% endif %}
+      - WEBSOCKET_ENABLED=true
+      - ROCKET_PORT=8080
+      - TZ={{ vaultwarden_timezone | default('UTC') }}
+    volumes:
+      - ./vaultwarden:/data
+    ports:
+      - "8200:8080"
+      - "3012:3012"  # WebSocket port
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vaultwarden.rule=Host(`vaultwarden.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}`)"
+      - "traefik.http.routers.vaultwarden.entrypoints=websecure"
+      - "traefik.http.routers.vaultwarden.tls.certresolver=mytls"
+      - "traefik.http.services.vaultwarden.loadbalancer.server.port=8080"
+      # WebSocket support
+      - "traefik.http.routers.vaultwarden-ws.rule=Host(`vaultwarden.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}`) && Path(`/notifications/hub`)"
+      - "traefik.http.routers.vaultwarden-ws.entrypoints=websecure"
+      - "traefik.http.routers.vaultwarden-ws.tls.certresolver=mytls"
+      - "traefik.http.services.vaultwarden-ws.loadbalancer.server.port=3012"
+    restart: unless-stopped
+
+{% if minecraft_servers is defined and minecraft_servers|length > 0 %}
+{% for server in minecraft_servers %}
+  minecraft-{{ server.id | lower }}:
+    image: {{ server.image | default('harbor.prod.thebozic.com/mc-server/minecraft-server:prod-latest') }}
+    container_name: minecraft-{{ server.id | lower }}
+    # Note: Container runs as minecraft user (UID 1000) inside - data volume must be owned by UID 1000
+    depends_on:
+      - traefik
+    security_opt:
+      - no-new-privileges:true
+    # Keep some security restrictions
+    # Note: Not dropping all caps due to custom image requirements
+    environment:
+      # Essential Minecraft Server Settings
+      - EULA={{ 'TRUE' if server.eula else 'FALSE' }}
+      - TYPE={{ server.type | default('SPIGOT') }}
+      - VERSION={{ server.version | default('LATEST') }}
+      - MEMORY={{ server.memory | default('2G') }}
+      - MAX_MEMORY={{ server.max_memory | default('4G') }}
+      
+      # Core Server Configuration (maps to defaults/core.env variables)
+      - DIFFICULTY={{ server.difficulty | default('hard') }}
+      - GAMEMODE={{ server.mode | default('survival') }}
+      - MOTD={{ server.server_name | default('Minecraft Server') }}
+      - VIEW_DISTANCE={{ server.view_distance | default('16') }}
+      - SIMULATION_DISTANCE={{ server.simulation_distance | default('10') }}
+      - MAX_PLAYERS={{ server.max_players | default('20') }}
+      - ONLINE_MODE={{ 'true' if server.online_mode | default(true) else 'false' }}
+      - PVP={{ 'true' if server.pvp | default(true) else 'false' }}
+      - ALLOW_NETHER={{ 'true' if server.allow_nether | default(true) else 'false' }}
+      - ENABLE_COMMAND_BLOCK={{ 'true' if server.enable_command_block | default(true) else 'false' }}
+      
+      # Whitelist Configuration
+      - WHITELIST_ENABLED={{ 'true' if server.whitelist_enabled | default(false) else 'false' }}
+      - ENFORCE_WHITELIST={{ 'true' if server.whitelist_enabled | default(false) else 'false' }}
+{% if server.whitelist is defined and server.whitelist|length > 0 %}
+      - OVERRIDE_WHITELIST={{ server.whitelist | join(',') }}
+{% endif %}
+      
+      # RCON Configuration
+      - ENABLE_RCON={{ 'true' if server.enable_rcon | default(true) else 'false' }}
+      - RCON_PASSWORD=${MINECRAFT_{{ server.id | upper }}_RCON_PASSWORD}
+      - RCON_PORT=25575
+      
+      # Timezone
+      - TZ={{ server.timezone | default('America/Toronto') }}
+{% if server.seed is defined %}
+      
+      # World Seed
+      - LEVEL_SEED={{ server.seed }}
+{% endif %}
+{% if server.level_name is defined %}
+      - LEVEL_NAME={{ server.level_name }}
+{% endif %}
+{% if server.server_ip is defined %}
+      - SERVER_IP={{ server.server_ip }}
+{% endif %}
+{% if server.bluemap_enabled | default(false) %}
+      
+      # BlueMap Configuration (maps to defaults/bluemap.env variables)
+      - BLUEMAP_ACCEPT_DOWNLOAD={{ 'true' if server.bluemap_accept_download | default(true) else 'false' }}
+      - BLUEMAP_PORT={{ server.bluemap_port | default('8100') }}
+      - BLUEMAP_WEBSERVER_ENABLED=true
+{% endif %}
+{% if server.discord_enabled | default(false) %}
+      
+      # Discord Integration (maps to defaults/discord.env variables)
+      - DISCORD_BOT_TOKEN=${MINECRAFT_{{ server.id | upper }}_DISCORD_BOT_TOKEN}
+      - DISCORD_GUILD_ID={{ server.discord_guild_id }}
+      - DISCORD_CHAT_CHANNEL_ID={{ server.discord_chat_channel_id }}
+{% if server.discord_console_channel_id is defined %}
+      - DISCORD_CONSOLE_CHANNEL_ID={{ server.discord_console_channel_id }}
+{% endif %}
+      # Discord Account Linking (maps to defaults/discord.env linking variables)
+      - DISCORD_LINKING_ENABLED={{ 'true' if server.discord_linking_enabled | default(true) else 'false' }}
+      - DISCORD_LINKING_MUST_BE_IN_SERVER={{ server.discord_linking_must_be_in_server | default('true') }}
+      - DISCORD_LINKING_WHITELIST_BYPASS={{ 'true' if server.discord_linking_whitelist_bypass | default(true) else 'false' }}
+{% if server.discord_linking_require_subscriber_role is defined %}
+      - DISCORD_LINKING_REQUIRE_SUBSCRIBER_ROLE={{ 'true' if server.discord_linking_require_subscriber_role else 'false' }}
+{% endif %}
+{% if server.discord_linking_subscriber_roles is defined %}
+      - DISCORD_LINKING_SUBSCRIBER_ROLES={{ server.discord_linking_subscriber_roles | join(',') }}
+{% endif %}
+{% endif %}
+{% if server.geyser_enabled | default(false) %}
+      
+      # Geyser/Bedrock Configuration (maps to defaults/geyser.env variables)
+      - GEYSER_PORT={{ server.geyser_port | default('19132') }}
+      - GEYSER_AUTH_TYPE={{ server.geyser_auth_type | default('floodgate') }}
+{% endif %}
+    ports:
+      - "{{ server.minecraft_port | default('25565') }}:25565/tcp"
+      - "{{ server.minecraft_port | default('25565') }}:25565/udp"
+{% if server.bluemap_enabled | default(false) %}
+      - "{{ server.bluemap_port | default('8100') }}:{{ server.bluemap_port | default('8100') }}"
+{% endif %}
+{% if server.geyser_enabled | default(false) %}
+      - "{{ server.geyser_port | default('19132') }}:{{ server.geyser_port | default('19132') }}/udp"
+{% endif %}
+    volumes:
+      - ./minecraft-{{ server.id | lower }}:/data
+{% if server.bluemap_enabled | default(false) %}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bluemap-{{ server.id | lower }}.rule=Host(`{{ server.bluemap_hostname | default('bluemap-' + server.id | lower + '.' + env + '.thebozic.com') }}`)"
+      - "traefik.http.routers.bluemap-{{ server.id | lower }}.entrypoints=websecure"
+      - "traefik.http.routers.bluemap-{{ server.id | lower }}.tls.certresolver=mytls"
+      - "traefik.http.services.bluemap-{{ server.id | lower }}.loadbalancer.server.port={{ server.bluemap_port | default('8100') }}"
+{% endif %}
+    restart: unless-stopped
+
+{% endfor %}
+{% endif %}
+{% elif host in ['hephaestus-dev', 'hephaestus-prod'] %}
+  traefik:
+    image: traefik:2.11
+    container_name: traefik
+    user: "65534:{{ docker_gid | default('docker') }}"  # Run as nobody with docker group access
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --certificatesresolvers.mytls.acme.dnschallenge=true
+      - --certificatesresolvers.mytls.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.mytls.acme.email={{ traefik_email }}
+      - --certificatesresolvers.mytls.acme.storage=/letsencrypt/acme.json
+      - --providers.file.filename=/dynamic/dynamic.yml
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/acme.json:/letsencrypt/acme.json
+      - ./traefik/dynamic.yml:/dynamic/dynamic.yml
+    environment:
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - DAC_OVERRIDE  # Needed to write acme.json
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`traefik.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.service=api@internal"
+      - "traefik.http.routers.api.tls=true"
+{% endif %}
+
+networks:
+  default:
+    name: homelab

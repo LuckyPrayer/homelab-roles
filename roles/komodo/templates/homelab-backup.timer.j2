@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily backup timer for Docker containers to Backblaze B2
+Requires=homelab-backup.service
+
+[Timer]
+# Run at 3 AM every day
+OnCalendar=*-*-* 03:00:00
+
+# Add random delay up to 30 minutes to stagger backups across hosts
+RandomizedDelaySec=1800
+
+# Catch up if system was off during scheduled time
+Persistent=true
+
+[Install]
+WantedBy=timers.target

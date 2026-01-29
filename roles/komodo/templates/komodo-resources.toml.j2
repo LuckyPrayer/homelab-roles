@@ -1,0 +1,181 @@
+# Komodo Resource Sync Configuration
+# This file defines stacks and procedures for the homelab
+# Managed by Ansible - regenerated on deployment
+# 
+# NOTE: Backups are handled via systemd timers on each host, not via Komodo
+# Manual backup: ssh <host> "sudo /opt/scripts/komodo-backup.sh all full"
+
+# =============================================================================
+# SERVERS (Periphery Agents)
+# =============================================================================
+{% if komodo_mode == 'core' %}
+[[server]]
+name = "{{ inventory_hostname }}"
+description = "Komodo Core Host - {{ env | default('dev') }} environment"
+tags = ["{{ env | default('dev') }}", "core", "docker"]
+[server.config]
+address = "http://localhost:{{ komodo_periphery_port | default(8120) }}"
+enabled = true
+
+{% for host in groups['docker_hosts'] | default([]) if host != inventory_hostname and hostvars[host].komodo_mode | default('disabled') == 'periphery' %}
+[[server]]
+name = "{{ host }}"
+description = "Docker Host - {{ hostvars[host].env | default('dev') }} environment"
+tags = ["{{ hostvars[host].env | default('dev') }}", "periphery", "docker"]
+[server.config]
+address = "http://{{ hostvars[host].ansible_host }}:{{ hostvars[host].komodo_periphery_port | default(8120) }}"
+enabled = true
+{% endfor %}
+{% endif %}
+
+# =============================================================================
+# STACKS - Harbor Registry (hephaestus)
+# =============================================================================
+{% if 'hephaestus-dev' in groups['docker_hosts'] | default([]) or 'hephaestus-prod' in groups['docker_hosts'] | default([]) %}
+[[stack]]
+name = "harbor-{{ env | default('dev') }}"
+description = "Harbor Container Registry"
+tags = ["{{ env | default('dev') }}", "registry", "infrastructure"]
+deploy = true
+[stack.config]
+server = "hephaestus-{{ env | default('dev') }}"
+run_directory = "/opt/harbor"
+file_paths = ["docker-compose.yml"]
+{% endif %}
+
+# =============================================================================
+# STACKS - Orion Infrastructure (Traefik only - apps via homelab-apps)
+# =============================================================================
+{% if 'orion-dev' in groups['docker_hosts'] | default([]) or 'orion-prod' in groups['docker_hosts'] | default([]) %}
+[[stack]]
+name = "traefik-{{ env | default('dev') }}"
+description = "Traefik Reverse Proxy"
+tags = ["{{ env | default('dev') }}", "proxy", "infrastructure"]
+deploy = true
+[stack.config]
+server = "orion-{{ env | default('dev') }}"
+run_directory = "/opt/stacks/traefik"
+file_paths = ["docker-compose.yml"]
+{% endif %}
+
+# =============================================================================
+# STACKS - Monitoring (argus)
+# =============================================================================
+# NOTE: The monitoring stack (Prometheus, Grafana, Loki, etc.) is deployed as a
+# single stack at /opt/monitoring by the monitoring-stack role.
+# It's not separated into individual stacks like other services.
+{% if 'argus-dev' in groups['docker_hosts'] | default([]) or 'argus-prod' in groups['docker_hosts'] | default([]) %}
+[[stack]]
+name = "monitoring-{{ env | default('dev') }}"
+description = "Monitoring Stack (Prometheus, Grafana, Loki, Alertmanager)"
+tags = ["{{ env | default('dev') }}", "monitoring", "infrastructure"]
+deploy = true
+[stack.config]
+server = "argus-{{ env | default('dev') }}"
+run_directory = "/opt/monitoring"
+file_paths = ["docker-compose.yml"]
+{% endif %}
+
+# =============================================================================
+# PROCEDURES - Deployment
+# =============================================================================
+[[procedure]]
+name = "deploy-all-{{ env | default('dev') }}"
+description = "Deploy all infrastructure stacks (apps deployed via homelab-apps role)"
+tags = ["{{ env | default('dev') }}", "deployment"]
+
+[[procedure.config.stage]]
+name = "Deploy Infrastructure"
+executions = [
+{% if 'hephaestus-dev' in groups['docker_hosts'] | default([]) or 'hephaestus-prod' in groups['docker_hosts'] | default([]) %}
+  { execution.type = "DeployStack", execution.params.stack = "harbor-{{ env | default('dev') }}" },
+{% endif %}
+{% if 'orion-dev' in groups['docker_hosts'] | default([]) or 'orion-prod' in groups['docker_hosts'] | default([]) %}
+  { execution.type = "DeployStack", execution.params.stack = "traefik-{{ env | default('dev') }}" },
+{% endif %}
+{% if 'argus-dev' in groups['docker_hosts'] | default([]) or 'argus-prod' in groups['docker_hosts'] | default([]) %}
+  { execution.type = "DeployStack", execution.params.stack = "monitoring-{{ env | default('dev') }}" },
+{% endif %}
+]
+
+# =============================================================================
+# PROCEDURES - Maintenance
+# =============================================================================
+[[procedure]]
+name = "restart-all-{{ env | default('dev') }}"
+description = "Restart all stacks"
+tags = ["{{ env | default('dev') }}", "maintenance"]
+
+[[procedure.config.stage]]
+name = "Restart Infrastructure"
+executions = [
+{% if 'hephaestus-dev' in groups['docker_hosts'] | default([]) or 'hephaestus-prod' in groups['docker_hosts'] | default([]) %}
+  { execution.type = "RestartStack", execution.params.stack = "harbor-{{ env | default('dev') }}" },
+{% endif %}
+{% if 'orion-dev' in groups['docker_hosts'] | default([]) or 'orion-prod' in groups['docker_hosts'] | default([]) %}
+  { execution.type = "RestartStack", execution.params.stack = "traefik-{{ env | default('dev') }}" },
+{% endif %}
+{% if 'argus-dev' in groups['docker_hosts'] | default([]) or 'argus-prod' in groups['docker_hosts'] | default([]) %}
+  { execution.type = "RestartStack", execution.params.stack = "monitoring-{{ env | default('dev') }}" },
+{% endif %}
+]
+
+# =============================================================================
+# PROCEDURES - Restore from B2 Backups (Disaster Recovery)
+# =============================================================================
+# NOTE: Backup/restore commands must be run manually via SSH or through
+# Komodo Actions (defined separately). The RunCommand execution type does not
+# exist in Komodo ResourceSync.
+#
+# Manual restore examples:
+#   ssh orion-dev "/opt/scripts/komodo-restore.sh n8n latest"
+#   ssh orion-dev "/opt/scripts/komodo-restore.sh mealie latest"
+#   ssh orion-dev "/opt/scripts/komodo-restore.sh vaultwarden latest"
+#   ssh hephaestus-dev "/opt/scripts/komodo-restore.sh harbor latest"
+#
+# Manual backup examples:
+#   ssh orion-dev "/opt/scripts/komodo-backup.sh all full"
+#   ssh hephaestus-dev "/opt/scripts/komodo-backup.sh harbor full"
+# =============================================================================
+
+# =============================================================================
+# GIT-BASED APPLICATION STACKS (Managed via homelab-apps repository)
+# =============================================================================
+# Applications are fully decoupled from Ansible infrastructure.
+# - All app definitions live in homelab-apps/manifest.yml
+# - Each app has its own config.yml with backup/restore settings
+# - Deploy apps via: ./scripts/run-playbook.sh --env=dev deploy-all --tags homelab-apps
+# - Or manually: ssh <host> "/opt/homelab-apps/scripts/deploy.sh <app>"
+#
+# To add a new application:
+#   1. Create folder in homelab-apps repo (e.g., uptime-kuma/)
+#   2. Add docker-compose.yml with ${VAR} for secrets
+#   3. Add config.yml with backup/secrets configuration
+#   4. Add to manifest.yml host profiles or apps list
+#   5. Push to Git and run deploy playbook
+# =============================================================================
+
+# Git-managed apps - deployed via homelab-apps role reading manifest.yml
+# Stacks shown here for Komodo visibility/management only
+{% if 'orion-dev' in groups['docker_hosts'] | default([]) or 'orion-prod' in groups['docker_hosts'] | default([]) %}
+
+[[stack]]
+name = "homelab-apps-{{ env | default('dev') }}"
+description = "Git-managed applications (n8n, mealie, vaultwarden, minecraft, homepage, etc.)"
+tags = ["{{ env | default('dev') }}", "applications", "git-managed"]
+[stack.config]
+server = "orion-{{ env | default('dev') }}"
+project_name = "homelab-apps"
+git_provider = "github.com"
+git_account = "{{ komodo_github_account | default('LuckyPrayer') }}"
+repo = "LuckyPrayer/homelab-apps"
+branch = "main"
+run_directory = "."
+file_paths = []
+environment = """
+ENV={{ env | default('dev') }}
+BASE_DOMAIN={{ base_domain | default('thebozic.com') }}
+TZ={{ timezone | default('America/Toronto') }}
+"""
+
+{% endif %}

@@ -1,0 +1,6 @@
+---
+# Handlers for homelab-compose role
+
+- name: Reload systemd for homelab-compose
+  ansible.builtin.systemd:
+    daemon_reload: yes

@@ -1,0 +1,352 @@
+---
+# Traefik Proxy Role Tasks
+# Deploy Traefik as a reverse proxy for cross-VLAN service access
+
+- name: Check if Infisical CLI is installed
+  ansible.builtin.command: which infisical
+  register: infisical_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Infisical CLI repository setup script
+  ansible.builtin.shell: |
+    curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash
+  args:
+    executable: /bin/bash
+    creates: /etc/apt/sources.list.d/infisical.list
+  when: infisical_check.rc != 0
+
+- name: Ensure Docker is installed
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+      - infisical
+    state: present
+    update_cache: yes
+  become: yes
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Ensure Infisical token directory exists
+  ansible.builtin.file:
+    path: /root
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+
+- name: Place Infisical service token file
+  ansible.builtin.copy:
+    dest: /root/.infisical-token
+    content: "{{ traefik_proxy_infisical_token }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+  when: 
+    - traefik_proxy_use_dns_challenge
+    - traefik_proxy_infisical_token is defined
+    - traefik_proxy_infisical_token | length > 0
+  no_log: true
+
+- name: Fetch Cloudflare API token from Infisical
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get {{ traefik_proxy_cf_secret_name | default('CF_DNS_API_TOKEN') }} \
+      --projectId {{ traefik_proxy_infisical_project_id }} \
+      --env {{ traefik_proxy_infisical_env }} \
+      --path {{ traefik_proxy_infisical_path | default('/infrastructure/dns/cloudflare') }} \
+      --plain
+  register: cf_token_result
+  changed_when: false
+  no_log: true
+  when: 
+    - traefik_proxy_use_dns_challenge
+    - traefik_proxy_infisical_token is defined
+    - traefik_proxy_infisical_project_id is defined
+
+- name: Set Cloudflare token from Infisical
+  ansible.builtin.set_fact:
+    traefik_proxy_cf_api_token: "{{ cf_token_result.stdout }}"
+  when: 
+    - cf_token_result is defined
+    - cf_token_result is not skipped
+    - cf_token_result.rc == 0
+  no_log: true
+
+- name: Fallback to environment variable if Infisical fetch failed
+  ansible.builtin.set_fact:
+    traefik_proxy_cf_api_token: "{{ lookup('env', 'CF_DNS_API_TOKEN') }}"
+  when: >
+    cf_token_result is not defined or
+    cf_token_result is skipped or
+    cf_token_result.rc != 0
+
+- name: Create Traefik proxy directory structure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  loop:
+    - "{{ traefik_proxy_base_dir }}"
+    - "{{ traefik_proxy_base_dir }}/config"
+  become: yes
+
+# ============================================================================
+# CERTIFICATE BACKUP/RESTORE SETUP
+# Fetch B2 credentials and restore certificates from backup to avoid rate limits
+# ============================================================================
+- name: Fetch B2_ACCOUNT_ID from Infisical for certificate backup
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get B2_ACCOUNT_ID \
+      --projectId {{ traefik_proxy_infisical_project_id }} \
+      --env {{ traefik_proxy_infisical_env }} \
+      --path {{ traefik_proxy_backup_infisical_path }} \
+      --plain
+  register: b2_account_id_result
+  changed_when: false
+  no_log: true
+  when:
+    - traefik_proxy_cert_backup_enabled | default(true)
+    - traefik_proxy_infisical_token is defined
+    - traefik_proxy_infisical_token | length > 0
+  ignore_errors: true
+
+- name: Fetch B2_ACCOUNT_KEY from Infisical for certificate backup
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get B2_ACCOUNT_KEY \
+      --projectId {{ traefik_proxy_infisical_project_id }} \
+      --env {{ traefik_proxy_infisical_env }} \
+      --path {{ traefik_proxy_backup_infisical_path }} \
+      --plain
+  register: b2_account_key_result
+  changed_when: false
+  no_log: true
+  when:
+    - traefik_proxy_cert_backup_enabled | default(true)
+    - traefik_proxy_infisical_token is defined
+    - traefik_proxy_infisical_token | length > 0
+  ignore_errors: true
+
+- name: Fetch B2_BUCKET from Infisical for certificate backup
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get B2_BUCKET \
+      --projectId {{ traefik_proxy_infisical_project_id }} \
+      --env {{ traefik_proxy_infisical_env }} \
+      --path {{ traefik_proxy_backup_infisical_path }} \
+      --plain
+  register: b2_bucket_result
+  changed_when: false
+  no_log: true
+  when:
+    - traefik_proxy_cert_backup_enabled | default(true)
+    - traefik_proxy_infisical_token is defined
+    - traefik_proxy_infisical_token | length > 0
+  ignore_errors: true
+
+- name: Fetch RESTIC_PASSWORD from Infisical for certificate backup
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get RESTIC_PASSWORD \
+      --projectId {{ traefik_proxy_infisical_project_id }} \
+      --env {{ traefik_proxy_infisical_env }} \
+      --path {{ traefik_proxy_backup_infisical_path }} \
+      --plain
+  register: restic_password_result
+  changed_when: false
+  no_log: true
+  when:
+    - traefik_proxy_cert_backup_enabled | default(true)
+    - traefik_proxy_infisical_token is defined
+    - traefik_proxy_infisical_token | length > 0
+  ignore_errors: true
+
+- name: Set backup credentials from Infisical
+  ansible.builtin.set_fact:
+    traefik_proxy_b2_account_id: "{{ b2_account_id_result.stdout | default('') }}"
+    traefik_proxy_b2_account_key: "{{ b2_account_key_result.stdout | default('') }}"
+    traefik_proxy_b2_bucket: "{{ b2_bucket_result.stdout | default('homelab-backups') }}"
+    traefik_proxy_restic_password: "{{ restic_password_result.stdout | default('') }}"
+  when:
+    - traefik_proxy_cert_backup_enabled | default(true)
+    - b2_account_id_result is defined
+    - b2_account_id_result is not skipped
+  no_log: true
+
+- name: Install restic for certificate backups
+  ansible.builtin.apt:
+    name: restic
+    state: present
+  become: yes
+  when: traefik_proxy_cert_backup_enabled | default(true)
+
+- name: Deploy certificate backup environment file
+  ansible.builtin.template:
+    src: backup.env.j2
+    dest: "{{ traefik_proxy_base_dir }}/backup.env"
+    mode: '0600'
+    owner: root
+    group: root
+  become: yes
+  when:
+    - traefik_proxy_cert_backup_enabled | default(true)
+    - traefik_proxy_b2_account_id | default('') | length > 0
+
+- name: Deploy certificate backup script
+  ansible.builtin.template:
+    src: cert-backup.sh.j2
+    dest: "{{ traefik_proxy_base_dir }}/cert-backup.sh"
+    mode: '0755'
+    owner: root
+    group: root
+  become: yes
+  when: traefik_proxy_cert_backup_enabled | default(true)
+
+- name: Create acme.json for Let's Encrypt certificates
+  ansible.builtin.file:
+    path: "{{ traefik_proxy_base_dir }}/acme.json"
+    state: touch
+    mode: '0600'
+    owner: root
+    group: root
+    modification_time: preserve
+    access_time: preserve
+  become: yes
+
+- name: Restore certificates from B2 backup (if available)
+  ansible.builtin.command:
+    cmd: "{{ traefik_proxy_base_dir }}/cert-backup.sh restore"
+  become: yes
+  register: cert_restore_result
+  changed_when: "'restored successfully' in cert_restore_result.stdout"
+  failed_when: false
+  when:
+    - traefik_proxy_cert_backup_enabled | default(true)
+    - traefik_proxy_b2_account_id | default('') | length > 0
+
+- name: Display certificate restore result
+  ansible.builtin.debug:
+    msg: "{{ cert_restore_result.stdout_lines | default(['No restore attempted']) }}"
+  when: cert_restore_result is defined and cert_restore_result.stdout_lines is defined
+
+- name: Deploy Traefik docker-compose.yml
+
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ traefik_proxy_base_dir }}/docker-compose.yml"
+    mode: '0644'
+    owner: root
+    group: root
+  become: yes
+  notify: Restart Traefik proxy
+
+- name: Deploy Traefik dynamic configuration
+  ansible.builtin.template:
+    src: proxy-rules.yml.j2
+    dest: "{{ traefik_proxy_base_dir }}/config/proxy-rules.yml"
+    mode: '0644'
+    owner: root
+    group: root
+  become: yes
+  notify: Restart Traefik proxy
+
+- name: Create .env file for secrets
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ traefik_proxy_env_file }}"
+    mode: '0600'
+    owner: root
+    group: root
+  become: yes
+  notify: Restart Traefik proxy
+  when: traefik_proxy_use_dns_challenge
+
+- name: Start Traefik proxy containers
+  community.docker.docker_compose_v2:
+    project_src: "{{ traefik_proxy_base_dir }}"
+    state: present
+    pull: "always"
+  become: yes
+  register: traefik_proxy_output
+
+# ============================================================================
+# CERTIFICATE BACKUP TIMER
+# Set up systemd timer for daily certificate backups
+# ============================================================================
+- name: Deploy certificate backup systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/traefik-cert-backup.service
+    content: |
+      [Unit]
+      Description=Backup Traefik Let's Encrypt certificates to B2
+      After=network.target
+
+      [Service]
+      Type=oneshot
+      ExecStart={{ traefik_proxy_base_dir }}/cert-backup.sh backup
+      User=root
+      StandardOutput=journal
+      StandardError=journal
+    mode: '0644'
+  become: yes
+  when: traefik_proxy_cert_backup_enabled | default(true)
+
+- name: Deploy certificate backup systemd timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/traefik-cert-backup.timer
+    content: |
+      [Unit]
+      Description=Daily Traefik certificate backup timer
+
+      [Timer]
+      OnCalendar=*-*-* 04:00:00
+      Persistent=true
+      RandomizedDelaySec=1800
+
+      [Install]
+      WantedBy=timers.target
+    mode: '0644'
+  become: yes
+  when: traefik_proxy_cert_backup_enabled | default(true)
+  notify: Reload systemd
+
+- name: Enable and start certificate backup timer
+  ansible.builtin.systemd:
+    name: traefik-cert-backup.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  become: yes
+  when: traefik_proxy_cert_backup_enabled | default(true)
+
+- name: Run initial certificate backup (if certificates exist)
+  ansible.builtin.command:
+    cmd: "{{ traefik_proxy_base_dir }}/cert-backup.sh backup"
+  become: yes
+  register: initial_backup_result
+  changed_when: "'Backup complete' in initial_backup_result.stdout"
+  failed_when: false
+  when:
+    - traefik_proxy_cert_backup_enabled | default(true)
+    - traefik_proxy_b2_account_id | default('') | length > 0
+
+- name: Display Traefik proxy status
+  ansible.builtin.debug:
+    msg: 
+      - "Traefik proxy deployed successfully!"
+      - "Dashboard URL: https://{{ traefik_proxy_dashboard_host }}"
+      - "Services:"
+      - "{{ traefik_proxy_backends | map(attribute='host') | list }}"
+      - ""
+      - "Certificate Backup:"
+      - "  - Backup script: {{ traefik_proxy_base_dir }}/cert-backup.sh"
+      - "  - Timer: traefik-cert-backup.timer (runs daily at 4 AM)"
+      - "  - Manual backup: {{ traefik_proxy_base_dir }}/cert-backup.sh backup"
+      - "  - Manual restore: {{ traefik_proxy_base_dir }}/cert-backup.sh restore"

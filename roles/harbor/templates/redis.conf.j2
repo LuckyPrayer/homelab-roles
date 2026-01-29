@@ -1,0 +1,44 @@
+# Harbor Redis Configuration
+# Custom config to fix RDB snapshot "server root dir unknown" errors
+# This occurs when Docker container working directory becomes desynchronized
+
+# CRITICAL: Explicitly set working directory FIRST
+# This prevents the "server root dir unknown" error during bgsave
+dir /var/lib/redis
+dbfilename dump.rdb
+
+# RDB persistence settings (Harbor default)
+# Save if at least 1 key changed in 900 seconds (15 min)
+save 900 1
+# Save if at least 10 keys changed in 300 seconds (5 min)  
+save 300 10
+# Save if at least 10000 keys changed in 60 seconds
+save 60 10000
+
+# Stop writes on bgsave error (set to no to prevent service disruption)
+stop-writes-on-bgsave-error no
+
+# Compress RDB files
+rdbcompression yes
+rdbchecksum yes
+
+# Keep AOF disabled (default for Harbor)
+appendonly no
+
+# Memory management - evict least recently used keys when memory is full
+maxmemory-policy allkeys-lru
+
+# Logging
+loglevel notice
+
+# Network
+bind 0.0.0.0
+port 6379
+protected-mode no
+
+# Connection settings
+tcp-keepalive 300
+timeout 0
+
+# Max clients
+maxclients 10000

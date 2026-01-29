@@ -1,0 +1,72 @@
+---
+# Docker Backup Role Defaults
+
+# Backup configuration
+backup_enabled: true
+backup_schedule: "daily"  # daily, weekly, or cron expression
+backup_time: "02:00"  # Time to run backup (24-hour format)
+backup_retention_days: 30
+
+# Backup mode: 'apps' (reads from homelab-apps config.yml) or 'stacks' (legacy per-service dirs)
+backup_mode: "apps"  # Use 'stacks' for legacy mode without homelab-apps
+
+# homelab-apps directory (for apps mode - reads config.yml from each app)
+homelab_apps_path: "/opt/homelab-apps"
+
+# Stacks base directory (for stacks mode - legacy)
+stacks_base_dir: "/opt/stacks"
+
+# Auto-discovery settings
+# When backup_mode is 'apps', containers are discovered from homelab-apps/*/config.yml
+# When backup_mode is 'stacks', containers are discovered from stacks_base_dir
+backup_discovery_enabled: true
+
+# Legacy: Explicit container list (deprecated - use config.yml in homelab-apps instead)
+# Only used when backup_discovery_enabled is false
+backup_containers: []
+
+# Stacks to backup (for stacks mode - auto-discovered if empty)
+backup_stacks: []  # Leave empty to auto-discover from stacks_base_dir
+
+# Harbor-specific backup paths
+backup_harbor_enabled: true
+backup_harbor_data_dir: "/opt/harbor/data"
+backup_harbor_config_dir: "/opt/harbor-installer/harbor"
+
+# Backup directories
+backup_log_dir: "/var/log"
+backup_script_dir: "/opt/backup-scripts"
+homelab_compose_dir: "/opt/homelab"
+
+# Restic configuration (loaded from Infisical via shell tasks)
+# These will be populated by tasks that fetch from Infisical
+backup_restic_password: ""
+backup_b2_account_id: ""
+backup_b2_account_key: ""
+backup_b2_bucket: ""
+
+# Notification configuration
+# Option 1: Direct Discord webhook URL (legacy)
+backup_discord_webhook: ""
+# Option 2: Discord bot webhook endpoint (recommended)
+backup_discord_bot_webhook: ""  # e.g., http://192.168.20.200:8085/webhook/backup
+
+# n8n webhook configuration for backup events
+# The script will POST to ${backup_n8n_webhook_url}/webhook/backup-event
+backup_n8n_webhook_url: ""  # e.g., http://192.168.20.100:5678
+backup_n8n_webhook_secret: ""  # Optional: shared secret for webhook authentication
+
+# Computed after B2 bucket is fetched
+backup_restic_repository: "b2:{{ backup_b2_bucket }}:/restic-repo"
+
+# Restore configuration
+# NOTE: Automatic restore is disabled by default to prevent overwriting fresh configurations
+# during deployment. Enable this only when you specifically want to restore from backup.
+# To restore manually, run: /opt/backup-scripts/docker-restore.sh --interactive
+restore_enabled: false  # Automatically restore from backup during deployment
+restore_snapshot_id: "latest"  # Specific snapshot ID or "latest"
+
+# Use new komodo restore scripts (per-host B2 paths) instead of legacy restore
+# The new system stores backups at b2:bucket:hostname instead of b2:bucket:/restic-repo
+# This allows for better organization and host-specific backups
+restore_use_komodo_scripts: true

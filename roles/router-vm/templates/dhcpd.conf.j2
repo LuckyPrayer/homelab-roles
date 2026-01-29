@@ -1,0 +1,32 @@
+# DHCP Server Configuration
+# Managed by Ansible - do not edit manually
+
+option domain-name "{{ base_domain | default('homelab.local') }}";
+option domain-name-servers {{ router_dns_upstream | join(', ') }};
+
+default-lease-time 600;
+max-lease-time 7200;
+
+# Make sure dhcpd updates the DNS server
+ddns-update-style none;
+
+# Authoritative for this network
+authoritative;
+
+# Logging
+log-facility local7;
+
+{% for dhcp_config in router_dhcp_interfaces %}
+# DHCP configuration for {{ dhcp_config.interface }}
+subnet {{ dhcp_config.subnet | ansible.utils.ipaddr('network') }} netmask {{ dhcp_config.netmask }} {
+    range {{ dhcp_config.range_start }} {{ dhcp_config.range_end }};
+    option routers {{ dhcp_config.gateway }};
+{% if dhcp_config.dns_servers is defined %}
+    option domain-name-servers {{ dhcp_config.dns_servers | join(', ') }};
+{% endif %}
+{% if dhcp_config.domain is defined %}
+    option domain-name "{{ dhcp_config.domain }}";
+{% endif %}
+}
+
+{% endfor %}

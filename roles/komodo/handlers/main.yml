@@ -1,0 +1,6 @@
+---
+# Komodo Role - Handlers
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes

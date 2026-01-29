@@ -1,0 +1,34 @@
+# Komodo Core Configuration
+# This file is managed by Ansible - do not edit directly
+# Note: Required fields when using config file (env vars may not override)
+
+# Core Settings (required)
+title = "{{ komodo_title }}"
+host = "{{ komodo_host }}"
+passkey = "{{ komodo_passkey }}"
+
+# Database configuration
+database.uri = "mongodb://komodo-mongo:27017/komodo"
+
+# Monitoring refresh interval
+monitoring_interval = "15-sec"
+
+# Logging configuration
+logging.level = "info"
+
+# Authentication
+# First user to log in becomes admin
+local_auth = true
+enable_new_users = true
+
+{% if github_token | default('') != '' %}
+# GitHub Git Provider for private repository access
+[[git_provider]]
+domain = "github.com"
+accounts = [
+	{ username = "LuckyPrayer", token = "{{ github_token }}" },
+]
+{% endif %}
+
+# Server definitions are created via the UI or API
+# Existing servers will be auto-discovered via periphery agent

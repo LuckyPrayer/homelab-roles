@@ -1,0 +1,59 @@
+# Sudoers configuration for ansible user
+# Provides minimum required privileges for Ansible automation
+
+Defaults:{{ custom_ansible_user_name }} !requiretty
+Defaults:{{ custom_ansible_user_name }} env_keep += "SSH_AUTH_SOCK"
+
+# System management
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/systemctl start *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/systemctl stop *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/systemctl restart *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/systemctl enable *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/systemctl disable *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/systemctl status *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/systemctl reload *
+
+# Package management
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/apt update
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/apt upgrade *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/apt install *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/apt remove *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/apt autoremove *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/apt-get update
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/apt-get upgrade *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/apt-get install *
+
+# Docker management
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/docker compose *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/docker-compose *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/docker ps *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/docker images *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/docker stop *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/docker start *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/docker restart *
+
+# File operations (needed for Ansible file module with become)
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/chmod *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/chown *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/mkdir *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/rm *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/cp *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/mv *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/touch *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/tee *
+
+# Network configuration
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/sbin/ufw *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/sbin/iptables *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/ip *
+
+# User and group management
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/sbin/useradd *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/sbin/usermod *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/sbin/groupadd *
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/sbin/groupmod *
+
+# Service configuration files
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/*
+{{ custom_ansible_user_name }} ALL=(root) NOPASSWD: /usr/bin/tee /etc/docker/*

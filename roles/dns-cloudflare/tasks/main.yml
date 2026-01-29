@@ -1,0 +1,179 @@
+---
+# Manage DNS records in Cloudflare
+
+- name: Check Infisical environment variables
+  ansible.builtin.fail:
+    msg: |
+      Required Infisical environment variables not set:
+      - INFISICAL_TOKEN: {{ 'SET' if lookup('env', 'INFISICAL_TOKEN') else 'NOT SET' }}
+      - INFISICAL_PROJECT_ID: {{ 'SET (' + lookup('env', 'INFISICAL_PROJECT_ID') + ')' if lookup('env', 'INFISICAL_PROJECT_ID') else 'NOT SET' }}
+      
+      Please ensure both are exported before running this playbook.
+  when: lookup('env', 'INFISICAL_TOKEN') == '' or lookup('env', 'INFISICAL_PROJECT_ID') == ''
+  delegate_to: localhost
+  run_once: true
+
+- name: Retrieve Cloudflare API token from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get CLOUDFLARE_API_TOKEN --path="{{ cloudflare_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ cloudflare_infisical_env }}
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  register: infisical_cloudflare_token
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  failed_when: false  # Don't fail immediately, check output first
+
+- name: Debug Infisical retrieval result
+  ansible.builtin.debug:
+    msg:
+      - "Infisical command return code: {{ infisical_cloudflare_token.rc | default('N/A') }}"
+      - "Stdout empty: {{ (infisical_cloudflare_token.stdout | default('')) == '' }}"
+      - "Stderr: {{ infisical_cloudflare_token.stderr | default('None') }}"
+  when: >
+    infisical_cloudflare_token is not defined or
+    infisical_cloudflare_token.rc | default(1) != 0 or
+    (infisical_cloudflare_token.stdout | default('')) == ''
+  delegate_to: localhost
+  run_once: true
+
+- name: Fail if Cloudflare token not retrieved
+  ansible.builtin.fail:
+    msg: |
+      Failed to retrieve CLOUDFLARE_API_TOKEN from Infisical!
+      
+      Path: {{ cloudflare_infisical_path }}
+      Environment: {{ cloudflare_infisical_env }}
+      Project ID: {{ lookup('env', 'INFISICAL_PROJECT_ID') }}
+      
+      Error: {{ infisical_cloudflare_token.stderr | default('No output received') }}
+      
+      The secret may not exist. To create it, run:
+        ./scripts/setup-cloudflare-token.sh
+      
+      Or manually:
+        infisical secrets set CLOUDFLARE_API_TOKEN="your_token" \
+          --path="{{ cloudflare_infisical_path }}" \
+          --env={{ cloudflare_infisical_env }} \
+          --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  when: >
+    infisical_cloudflare_token is not defined or
+    infisical_cloudflare_token.rc | default(1) != 0 or
+    (infisical_cloudflare_token.stdout | default('')) == ''
+  delegate_to: localhost
+  run_once: true
+
+- name: Set Cloudflare API token from Infisical
+  ansible.builtin.set_fact:
+    cloudflare_api_token_secret: "{{ infisical_cloudflare_token.stdout | default('') }}"
+  no_log: true
+  when: infisical_cloudflare_token.stdout | default('') != ''
+
+- name: Set virtual environment path
+  ansible.builtin.set_fact:
+    venv_path: "{{ playbook_dir }}/../.venv"
+  delegate_to: localhost
+  run_once: true
+
+- name: Check if virtual environment exists
+  ansible.builtin.stat:
+    path: "{{ venv_path }}/bin/pip"
+  delegate_to: localhost
+  run_once: true
+  register: venv_check
+
+- name: Create virtual environment if not exists
+  when: not venv_check.stat.exists
+  block:
+    - name: Create virtual environment
+      ansible.builtin.command:
+        cmd: python3 -m venv {{ venv_path }}
+        creates: "{{ venv_path }}/bin/activate"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Install cloudflare in virtual environment
+      ansible.builtin.pip:
+        name:
+          - cloudflare
+        state: present
+        virtualenv: "{{ venv_path }}"
+      delegate_to: localhost
+      run_once: true
+
+- name: Auto-generate DNS records from inventory
+  when: auto_generate_dns_records | bool
+  block:
+    - name: Build DNS records for development environment
+      ansible.builtin.set_fact:
+        generated_dev_records:
+          - name: "*.dev.{{ cloudflare_zone }}"
+            type: "{{ dns_record_type_internal }}"
+            content: "{{ hostvars[groups['docker_hosts'] | select('match', '.*-dev$') | first]['vm_ip'] }}"
+            proxied: false
+            ttl: "{{ dns_ttl }}"
+      when: groups['docker_hosts'] | select('match', '.*-dev$') | list | length > 0
+
+    - name: Build DNS records for production environment (internal)
+      ansible.builtin.set_fact:
+        generated_prod_records_internal:
+          - name: "*.prod.{{ cloudflare_zone }}"
+            type: "{{ dns_record_type_internal }}"
+            content: "{{ hostvars[groups['docker_hosts'] | select('match', '.*-prod$') | first]['vm_ip'] }}"
+            proxied: false
+            ttl: "{{ dns_ttl }}"
+            comment: "Internal IP - for LAN access"
+      when: groups['docker_hosts'] | select('match', '.*-prod$') | list | length > 0
+
+    - name: Build DNS records for production environment (external)
+      ansible.builtin.set_fact:
+        generated_prod_records_external:
+          - name: "*.prod.{{ cloudflare_zone }}"
+            type: "{{ dns_record_type_external }}"
+            content: "{{ public_ip }}"
+            proxied: "{{ dns_proxied }}"
+            ttl: "{{ dns_ttl }}"
+            comment: "External IP - for internet access"
+      when:
+        - public_ip != ""
+        - groups['docker_hosts'] | select('match', '.*-prod$') | list | length > 0
+
+    - name: Combine generated DNS records
+      ansible.builtin.set_fact:
+        all_dns_records: "{{ (generated_dev_records | default([])) + (generated_prod_records_external | default([])) }}"
+
+    - name: Use generated DNS records if none provided
+      ansible.builtin.set_fact:
+        cloudflare_dns_records: "{{ all_dns_records }}"
+      when: cloudflare_dns_records | length == 0
+
+- name: Display Cloudflare DNS records to be created/updated
+  ansible.builtin.debug:
+    msg: "{{ cloudflare_dns_records }}"
+  when: cloudflare_dns_records | length > 0
+
+- name: Manage Cloudflare DNS records
+  community.general.cloudflare_dns:
+    api_token: "{{ cloudflare_api_token_secret }}"
+    zone: "{{ cloudflare_zone }}"
+    record: "{{ item.name }}"
+    type: "{{ item.type }}"
+    value: "{{ item.content }}"
+    proxied: "{{ item.proxied | default(dns_proxied) }}"
+    ttl: "{{ item.ttl | default(dns_ttl) }}"
+    state: present
+  loop: "{{ cloudflare_dns_records }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  when: cloudflare_dns_records | length > 0
+  register: dns_result
+
+
+- name: Display DNS record results
+  ansible.builtin.debug:
+    msg: "DNS record {{ item.item.name }} -> {{ item.item.content }}: {{ 'Created/Updated' if item.changed else 'Already exists' }}"
+  loop: "{{ dns_result.results }}"
+  when: dns_result is defined and dns_result.results is defined

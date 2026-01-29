@@ -1,0 +1,133 @@
+site_name: {{ docs_site_name }}
+site_description: {{ docs_site_description }}
+site_author: {{ docs_site_author }}
+repo_url: {{ docs_repo_url }}
+repo_name: {{ docs_repo_name }}
+
+theme:
+  name: {{ docs_theme_name }}
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: {{ docs_theme_primary_color }}
+      accent: {{ docs_theme_accent_color }}
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: {{ docs_theme_primary_color }}
+      accent: {{ docs_theme_accent_color }}
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Quick Start:
+      - Quick Start Guide: QUICKSTART.md
+      - Quick Reference: QUICK_REFERENCE.md
+  - Deployment:
+      - Deployment Guide: DEPLOYMENT_GUIDE.md
+      - Deployment Flow: DEPLOYMENT_FLOW.md
+      - Dev Environment Deployment: DEV_ENVIRONMENT_DEPLOYMENT.md
+  - Network:
+      - Network Architecture: NETWORK_ARCHITECTURE.md
+      - VLAN Implementation: VLAN_IMPLEMENTATION_GUIDE.md
+      - Automated Network Setup: AUTOMATED_NETWORK_SETUP.md
+      - Firewall Rules: FIREWALL_RULES.md
+      - Troubleshooting VLANs: TROUBLESHOOTING_VLANS.md
+      - Multi-Bridge Setup: PROXMOX_MULTI_BRIDGE_SETUP.md
+      - Router VM Automation: ROUTER_VM_AUTOMATION.md
+  - DNS & Pi-hole:
+      - Pi-hole Setup: DNS_PIHOLE_SETUP.md
+      - Pi-hole Access: PIHOLE_ACCESS.md
+      - DNS Records Quick Ref: DNS_RECORDS_QUICK_REF.md
+      - DNS Local Records: DNS_LOCAL_RECORDS.md
+      - Pi-hole DNS Records Config: PIHOLE_DNS_RECORDS_CONFIG.md
+      - Pi-hole DNS Records Implementation: PIHOLE_DNS_RECORDS_IMPLEMENTATION.md
+  - Traefik Proxy:
+      - Traefik Quick Ref: TRAEFIK_PROXY_QUICK_REF.md
+      - Traefik Cross-VLAN Proxy: TRAEFIK_CROSS_VLAN_PROXY.md
+      - Traefik Deployment Checklist: TRAEFIK_PROXY_DEPLOYMENT_CHECKLIST.md
+      - Traefik Implementation Summary: TRAEFIK_PROXY_IMPLEMENTATION_SUMMARY.md
+      - Traefik Infisical Integration: TRAEFIK_PROXY_INFISICAL_INTEGRATION.md
+  - Infisical (Secrets):
+      - Quick Infisical Setup: QUICK_INFISICAL_SETUP.md
+      - Infisical Cloud-Init Setup: INFISICAL_CLOUD_INIT_SETUP.md
+      - Infisical Multi-Path Secrets: INFISICAL_MULTI_PATH_SECRETS.md
+      - Vault to Infisical Migration: VAULT_TO_INFISICAL_MIGRATION.md
+      - Pi-hole Infisical Integration: PIHOLE_INFISICAL_INTEGRATION.md
+      - Pi-hole Infisical Setup: PIHOLE_INFISICAL_SETUP.md
+      - Pi-hole Infisical Quick Ref: PIHOLE_INFISICAL_QUICK_REFERENCE.md
+      - Pi-hole Infisical Summary: PIHOLE_INFISICAL_IMPLEMENTATION_SUMMARY.md
+  - Docker & Backup:
+      - Docker Backup Checklist: DOCKER_BACKUP_CHECKLIST.md
+      - Docker Backup Implementation: DOCKER_BACKUP_IMPLEMENTATION.md
+      - Docker Backup Quick Ref: DOCKER_BACKUP_QUICK_REF.md
+      - Docker Backup Restore: DOCKER_BACKUP_RESTORE.md
+      - Docker Backup Restore Testing: DOCKER_BACKUP_RESTORE_TESTING.md
+      - Docker Compose V2 Migration: DOCKER_COMPOSE_V2_MIGRATION.md
+  - n8n Automation:
+      - n8n Workflow Auto Import: N8N_WORKFLOW_AUTO_IMPORT.md
+      - n8n Workflow Auto Import Quick Ref: N8N_WORKFLOW_AUTO_IMPORT_QUICK_REF.md
+      - n8n Credential Auto Import: N8N_CREDENTIAL_AUTO_IMPORT.md
+      - n8n Credential Import Quick Ref: N8N_CREDENTIAL_IMPORT_QUICK_REF.md
+      - n8n Docker Backup Workflow: N8N_DOCKER_BACKUP_WORKFLOW.md
+  - Cloud & Services:
+      - Cloud-Init Templates: CLOUD_INIT_TEMPLATES.md
+      - AWS IAM Quick Ref: AWS_IAM_QUICK_REF.md
+      - Rclone Configuration: RCLONE_CONFIGURATION.md
+      - Minecraft Port Forwarding: MINECRAFT_PORT_FORWARDING.md
+  - Documentation Server:
+      - Deployment Guide: DOCUMENTATION_SERVER.md
+      - Quick Reference: DOCUMENTATION_SERVER_QUICK_REF.md
+      - Orion Deployment: DOCUMENTATION_SERVER_ORION_DEPLOYMENT.md
+      - Implementation Summary: DOCUMENTATION_SERVER_IMPLEMENTATION_SUMMARY.md
+      - File Structure: DOCUMENTATION_SERVER_FILE_STRUCTURE.md
+      - Deployment Flow: DOCUMENTATION_SERVER_DEPLOYMENT_FLOW.md
+  - Troubleshooting:
+      - Docker Backup Deployment Summary: troubleshooting/DOCKER_BACKUP_DEPLOYMENT_SUMMARY.md
+      - Fix n8n Import Directory Mode: troubleshooting/FIX_N8N_IMPORT_DIRECTORY_MODE.md
+      - Fix n8n S3 Credential Import: troubleshooting/FIX_N8N_S3_CREDENTIAL_IMPORT.md
+      - Fix n8n Workflow Permission: troubleshooting/FIX_N8N_WORKFLOW_PERMISSION.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: {{ docs_repo_url }}

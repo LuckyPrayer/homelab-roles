@@ -1,0 +1,82 @@
+http:
+  # Middlewares
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    
+    # Security headers
+    security-headers:
+      headers:
+        frameDeny: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+
+  # Routers
+  routers:
+    # HTTP to HTTPS redirect
+    http-catchall:
+      rule: "HostRegexp(`{host:.+}`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: noop@internal
+      priority: 1
+
+{% for backend in traefik_proxy_backends %}
+    # {{ backend.name }} router
+    {{ backend.name }}-proxy:
+      rule: "Host(`{{ backend.host }}`)"
+      entryPoints:
+        - websecure
+      service: {{ backend.name }}-backend
+      middlewares:
+        - security-headers
+      tls:
+{% if traefik_proxy_use_dns_challenge %}
+        certResolver: {{ traefik_proxy_cert_resolver }}
+{% else %}
+        {}
+{% endif %}
+
+{% endfor %}
+
+  # Services (backend definitions)
+  services:
+{% for backend in traefik_proxy_backends %}
+    {{ backend.name }}-backend:
+      loadBalancer:
+        servers:
+          - url: "{{ backend.backend_url }}"
+        passHostHeader: true
+{% if 'harbor' in backend.name %}
+        # Harbor/Registry needs longer timeouts for large image pushes
+        responseForwarding:
+          flushInterval: "100ms"
+        serversTransport: harbor-transport
+{% endif %}
+{% if 'harbor-registry' not in backend.name %}
+        healthCheck:
+          path: "{{ backend.health_check_path | default('/') }}"
+          interval: "30s"
+          timeout: "15s"
+{% endif %}
+
+{% endfor %}
+
+  # Server transports for special configurations
+  serversTransports:
+    harbor-transport:
+      # Longer timeouts for Harbor/Docker Registry
+      forwardingTimeouts:
+        dialTimeout: "30s"
+        responseHeaderTimeout: "60s"
+        idleConnTimeout: "90s"
+      # Don't verify internal TLS certificates
+      insecureSkipVerify: true

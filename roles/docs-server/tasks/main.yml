@@ -1,0 +1,109 @@
+---
+- name: Check if documentation server is enabled
+  ansible.builtin.debug:
+    msg: "Setting up Homelab Documentation Server on {{ inventory_hostname }}"
+  when: docs_server_enabled | default(true)
+
+- name: Create documentation server base directory
+  ansible.builtin.file:
+    path: "{{ docs_server_base_dir }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ vm_ci_user | default('root') }}"
+    group: "{{ vm_ci_user | default('root') }}"
+  become: true
+
+- name: Create documentation server subdirectories
+  ansible.builtin.file:
+    path: "{{ docs_server_base_dir }}/{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ vm_ci_user | default('root') }}"
+    group: "{{ vm_ci_user | default('root') }}"
+  loop:
+    - docs
+    - docs/troubleshooting
+    - docs/workflows
+  become: true
+
+- name: Copy documentation files
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../docs/"
+    dest: "{{ docs_server_base_dir }}/docs/"
+    mode: '0644'
+    owner: "{{ vm_ci_user | default('root') }}"
+    group: "{{ vm_ci_user | default('root') }}"
+  become: true
+
+- name: Copy main README as index
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../README.md"
+    dest: "{{ docs_server_base_dir }}/docs/index.md"
+    mode: '0644'
+    owner: "{{ vm_ci_user | default('root') }}"
+    group: "{{ vm_ci_user | default('root') }}"
+  become: true
+
+- name: Template Dockerfile
+  ansible.builtin.copy:
+    src: Dockerfile
+    dest: "{{ docs_server_base_dir }}/Dockerfile"
+    mode: '0644'
+    owner: "{{ vm_ci_user | default('root') }}"
+    group: "{{ vm_ci_user | default('root') }}"
+  become: true
+
+- name: Template mkdocs configuration
+  ansible.builtin.template:
+    src: mkdocs.yml.j2
+    dest: "{{ docs_server_base_dir }}/mkdocs.yml"
+    mode: '0644'
+    owner: "{{ vm_ci_user | default('root') }}"
+    group: "{{ vm_ci_user | default('root') }}"
+  become: true
+
+- name: Template docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ docs_server_base_dir }}/docker-compose.yml"
+    mode: '0644'
+    owner: "{{ vm_ci_user | default('root') }}"
+    group: "{{ vm_ci_user | default('root') }}"
+  become: true
+
+- name: Build documentation server Docker image
+  ansible.builtin.command:
+    cmd: docker build -t {{ docs_server_image_name }}:{{ docs_server_image_tag }} .
+    chdir: "{{ docs_server_base_dir }}"
+  become: true
+  become_user: "{{ vm_ci_user | default('root') }}"
+  changed_when: true
+
+- name: Start documentation server container
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ docs_server_base_dir }}"
+  become: true
+  become_user: "{{ vm_ci_user | default('root') }}"
+  changed_when: true
+
+- name: Wait for documentation server container to be healthy
+  ansible.builtin.command:
+    cmd: docker inspect --format={% raw %}'{{.State.Health.Status}}'{% endraw %} {{ docs_server_container_name }}
+  register: health_status
+  until: health_status.stdout == 'healthy'
+  retries: 30
+  delay: 2
+  changed_when: false
+  ignore_errors: true
+
+- name: Display documentation server access information
+  ansible.builtin.debug:
+    msg: |
+      ✓ Documentation server deployed successfully!
+        Container: {{ docs_server_container_name }}
+        Port: {{ docs_server_port }}
+        Access: http://{{ ansible_host }}:{{ docs_server_port }}
+      {% if docs_traefik_enabled %}
+        Traefik URL: https://{{ docs_traefik_subdomain }}.{{ env }}.{{ base_domain }}
+      {% endif %}

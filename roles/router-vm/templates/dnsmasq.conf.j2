@@ -1,0 +1,67 @@
+# dnsmasq configuration for {{ inventory_hostname }}
+# Managed by Ansible - do not edit manually
+
+# Basic configuration
+domain-needed
+bogus-priv
+no-resolv
+no-poll
+
+# Upstream DNS servers
+{% for dns_server in router_dns_upstream %}
+server={{ dns_server }}
+{% endfor %}
+
+# Listen on specific interfaces
+{% for interface in router_dns_listen_interfaces %}
+interface={{ interface }}
+{% endfor %}
+
+# Don't listen on loopback
+except-interface=lo
+
+# Domain configuration
+{% if base_domain is defined %}
+domain={{ base_domain }}
+expand-hosts
+# Note: local directive removed to allow forwarding to Pi-hole
+# Without this, dnsmasq would not forward *.{{ base_domain }} queries upstream
+{% endif %}
+
+# Cache configuration
+cache-size=10000
+neg-ttl=3600
+
+# Local DNS records (resolved directly, bypass Pi-hole for performance)
+{% if dns_records is defined %}
+{% for record in dns_records %}
+{% if '*' in record.hostname %}
+# Wildcard domain: {{ record.hostname }}
+address=/{{ record.hostname | replace('*.', '') }}/{{ record.ip }}
+{% else %}
+# Static record: {{ record.hostname }}
+address=/{{ record.hostname }}/{{ record.ip }}
+{% if base_domain is defined and '.' not in record.hostname %}
+# Also add FQDN for short hostname: {{ record.hostname }}.{{ base_domain }}
+address=/{{ record.hostname }}.{{ base_domain }}/{{ record.ip }}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# Performance tuning
+dns-forward-max=1000
+all-servers
+
+# Bind to port 53 for external queries
+port=53
+bind-interfaces
+
+# Don't read system files
+no-hosts
+
+# Logging (enable for dev, disable for prod)
+{% if 'dev' in inventory_hostname %}
+log-queries
+log-facility=/var/log/dnsmasq.log
+{% endif %}

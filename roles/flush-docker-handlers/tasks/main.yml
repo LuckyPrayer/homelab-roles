@@ -1,0 +1,20 @@
+---
+# Flush Docker Handlers Role
+# This role ensures any pending Docker daemon restarts complete before
+# continuing to the next role. This prevents Harbor from starting while
+# Docker is about to restart, which would cause container corruption.
+
+- name: Flush handlers to complete any pending Docker restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Docker daemon to be ready after potential restart
+  ansible.builtin.command: docker info
+  register: docker_info_result
+  until: docker_info_result.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: false
+
+- name: Display Docker flush status
+  ansible.builtin.debug:
+    msg: "Docker daemon is ready - safe to start Harbor"

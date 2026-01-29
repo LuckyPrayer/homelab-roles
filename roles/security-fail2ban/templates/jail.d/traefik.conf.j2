@@ -1,0 +1,16 @@
+# Fail2ban Traefik Auth Jail Configuration
+# Managed by Ansible - Do not edit manually
+# Host: {{ inventory_hostname }}
+
+[traefik-auth]
+enabled = true
+port = {{ fail2ban_traefik_port }}
+filter = traefik-auth
+logpath = {{ fail2ban_traefik_logpath }}
+maxretry = {{ fail2ban_traefik_maxretry }}
+bantime = {{ fail2ban_traefik_bantime }}
+findtime = {{ fail2ban_traefik_findtime }}
+{% if fail2ban_discord_enabled | default(false) | bool %}
+action = %(action_)s
+         discord-notify
+{% endif %}

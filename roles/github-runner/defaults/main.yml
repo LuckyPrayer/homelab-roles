@@ -1,0 +1,36 @@
+---
+# GitHub Actions Runner - Default Variables
+
+# Runner version (use 'latest' to auto-detect)
+github_runner_version: "latest"
+
+# System architecture (x64, arm, arm64)
+github_runner_arch: "x64"
+
+# Runner user and permissions
+github_runner_user: "github-runner"
+github_runner_groups:
+  - docker  # Required for docker-based actions
+
+# Installation directory
+github_runner_dir: "/opt/actions-runner"
+github_runner_work_dir: "_work"
+
+# Runner configuration
+github_runner_name: "{{ inventory_hostname }}"
+github_runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - homelab
+  - "{{ env | default('dev') }}"
+
+# Repository settings (MUST be overridden)
+# github_runner_repo_url: "https://github.com/USERNAME/REPO"
+# github_runner_token: "from-infisical"
+
+# Extract repo name from URL for service naming
+github_runner_repo_name: "{{ github_runner_repo_url | regex_replace('.*github.com/', '') | regex_replace('/', '.') }}"
+
+# Force reconfiguration even if already configured
+github_runner_force_reconfigure: false

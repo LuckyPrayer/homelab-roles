@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Source Infisical config if it exists
+INFISICAL_CONFIG="{{ infisical_config_path | default('/etc/infisical/config.env') }}"
+if [[ -f "$INFISICAL_CONFIG" ]]; then
+  set -a
+  source "$INFISICAL_CONFIG"
+  set +a
+fi
+
+# Default parameters (environment overrides config file)
+ENV_SLUG="${INFISICAL_ENV:-{{ infisical_env_slug }}}"
+PROJECT_ID="${INFISICAL_PROJECT_ID:-{{ infisical_project_id | default('') }}}"
+TOKEN="${INFISICAL_TOKEN:-}"
+
+# Use service token from file if present and no token in environment
+if [[ -z "$TOKEN" && -f "{{ infisical_service_token_path }}" ]]; then
+  TOKEN=$(cat "{{ infisical_service_token_path }}")
+fi
+
+# Build command with required parameters
+ARGS=("--env" "$ENV_SLUG")
+
+if [[ -n "$PROJECT_ID" ]]; then
+  ARGS+=("--projectId" "$PROJECT_ID")
+fi
+
+if [[ -n "$TOKEN" ]]; then
+  ARGS+=("--token" "$TOKEN")
+fi
+
+# Paths to fetch secrets from (in order of precedence - later paths override earlier ones)
+# INFISICAL_PATHS should be set in /etc/infisical/config.env, fallback to root path only
+INFISICAL_PATHS="${INFISICAL_PATHS:-/}"
+
+# Fetch and merge secrets from multiple paths
+# We use a temporary file to accumulate all secrets in dotenv format
+TEMP_ENV_FILE=$(mktemp)
+trap "rm -f $TEMP_ENV_FILE" EXIT
+
+for PATH_ITEM in $INFISICAL_PATHS; do
+  ARGS_WITH_PATH=("${ARGS[@]}" "--path" "$PATH_ITEM")
+  # Fetch secrets from this path and append to temp file
+  # Later paths will override earlier ones with same key names
+  infisical export --format=dotenv "${ARGS_WITH_PATH[@]}" 2>/dev/null >> "$TEMP_ENV_FILE" || true
+done
+
+# Now use infisical run with the merged environment
+# We do this by sourcing the temp file to export all variables
+set -a  # Automatically export all variables
+source "$TEMP_ENV_FILE" 2>/dev/null || true
+set +a  # Turn off auto-export
+
+# Execute the command with all secrets in environment
+exec "${@}"

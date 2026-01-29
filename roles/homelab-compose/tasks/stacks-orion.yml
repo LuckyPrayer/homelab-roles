@@ -1,0 +1,197 @@
+---
+# Orion Stack Tasks
+# Deploys stacks for orion-dev and orion-prod hosts
+
+# =============================================================================
+# TRAEFIK STACK
+# =============================================================================
+- name: Create traefik stack directory structure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: docker-svc
+    group: docker
+    mode: '0750'
+  loop:
+    - "{{ stacks_base_dir }}/traefik"
+    - "{{ stacks_base_dir }}/traefik/config"
+
+- name: Template traefik docker-compose
+  ansible.builtin.template:
+    src: stacks/traefik/docker-compose.yml.j2
+    dest: "{{ stacks_base_dir }}/traefik/docker-compose.yml"
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+
+- name: Template traefik dynamic config
+  ansible.builtin.template:
+    src: traefik-dynamic.yml.j2
+    dest: "{{ stacks_base_dir }}/traefik/config/dynamic.yml"
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+
+- name: Ensure traefik acme.json exists with secure permissions
+  ansible.builtin.file:
+    path: "{{ stacks_base_dir }}/traefik/config/acme.json"
+    state: touch
+    owner: "65534"
+    group: docker
+    mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Create traefik .env file
+  ansible.builtin.template:
+    src: stacks/traefik/env.j2
+    dest: "{{ stacks_base_dir }}/traefik/.env"
+    owner: docker-svc
+    group: docker
+    mode: '0600'
+
+# -----------------------------------------------------------------------------
+# TRAEFIK CERTIFICATE BACKUP/RESTORE
+# Restore certificates from B2 to avoid Let's Encrypt rate limits
+# -----------------------------------------------------------------------------
+- name: Deploy traefik certificate backup environment file
+  ansible.builtin.template:
+    src: stacks/traefik/backup.env.j2
+    dest: "{{ stacks_base_dir }}/traefik/backup.env"
+    owner: root
+    group: root
+    mode: '0600'
+  when: backup_b2_account_id is defined and backup_b2_account_id | length > 0
+
+- name: Deploy traefik certificate backup script
+  ansible.builtin.template:
+    src: stacks/traefik/cert-backup.sh.j2
+    dest: "{{ stacks_base_dir }}/traefik/cert-backup.sh"
+    owner: root
+    group: root
+    mode: '0755'
+  when: backup_b2_account_id is defined and backup_b2_account_id | length > 0
+
+- name: Restore traefik certificates from B2 backup (if available)
+  ansible.builtin.command:
+    cmd: "{{ stacks_base_dir }}/traefik/cert-backup.sh restore"
+  become: yes
+  register: traefik_cert_restore_result
+  changed_when: "'restored successfully' in traefik_cert_restore_result.stdout"
+  failed_when: false
+  when: backup_b2_account_id is defined and backup_b2_account_id | length > 0
+
+- name: Display traefik certificate restore result
+  ansible.builtin.debug:
+    msg: "{{ traefik_cert_restore_result.stdout_lines | default(['No restore attempted']) }}"
+  when: traefik_cert_restore_result is defined and traefik_cert_restore_result.stdout_lines is defined
+
+- name: Setup daily traefik certificate backup timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/traefik-cert-backup.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Backup Traefik certificates to B2
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart={{ stacks_base_dir }}/traefik/cert-backup.sh backup
+      StandardOutput=journal
+      StandardError=journal
+  when: backup_b2_account_id is defined and backup_b2_account_id | length > 0
+  notify: Reload systemd for homelab-compose
+
+- name: Setup daily traefik certificate backup timer unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/traefik-cert-backup.timer
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Daily Traefik certificate backup
+
+      [Timer]
+      OnCalendar=daily
+      RandomizedDelaySec=3600
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+  when: backup_b2_account_id is defined and backup_b2_account_id | length > 0
+  notify: Reload systemd for homelab-compose
+
+- name: Enable and start traefik certificate backup timer
+  ansible.builtin.systemd:
+    name: traefik-cert-backup.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: backup_b2_account_id is defined and backup_b2_account_id | length > 0
+
+# =============================================================================
+# NOTE: Application stacks (mealie, n8n, vaultwarden, minecraft, homepage)
+# are now managed by the homelab-apps role via manifest.yml
+# Only infrastructure stacks (traefik, glances) remain in this file
+# =============================================================================
+
+# =============================================================================
+# GLANCES STACK (System Monitoring for Homepage widgets)
+# =============================================================================
+- name: Create glances stack directory
+  ansible.builtin.file:
+    path: "{{ stacks_base_dir }}/glances"
+    state: directory
+    owner: docker-svc
+    group: docker
+    mode: '0750'
+  when: glances_enabled | default(true)
+
+- name: Template glances docker-compose
+  ansible.builtin.template:
+    src: stacks/glances/docker-compose.yml.j2
+    dest: "{{ stacks_base_dir }}/glances/docker-compose.yml"
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+  when: glances_enabled | default(true)
+
+# =============================================================================
+# START INFRASTRUCTURE STACKS
+# =============================================================================
+# NOTE: Application stacks are deployed by homelab-apps role
+
+- name: Build list of orion infrastructure stacks
+  ansible.builtin.set_fact:
+    orion_stacks:
+      - traefik
+      - glances
+
+# Stop old monolithic compose if it exists
+- name: Check if old monolithic compose exists
+  ansible.builtin.stat:
+    path: /opt/homelab/docker-compose.yml
+  register: old_compose_check
+
+- name: Stop old monolithic compose stack
+  ansible.builtin.shell: |
+    cd /opt/homelab
+    docker compose down --remove-orphans || true
+  become: true
+  when: old_compose_check.stat.exists
+  ignore_errors: yes
+
+- name: Start infrastructure stacks
+  ansible.builtin.shell: |
+    cd {{ stacks_base_dir }}/{{ item }}
+    /usr/local/bin/infisical-run docker compose up -d --remove-orphans
+  loop: "{{ orion_stacks }}"
+  become: true
+  become_user: docker-svc
+  environment:
+    INFISICAL_ENV: "{{ env | default('dev') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PATHS: "/ /infrastructure/backup /infrastructure/dns/cloudflare"
+  register: stack_start
+  changed_when: "'Started' in stack_start.stdout or 'Created' in stack_start.stdout"

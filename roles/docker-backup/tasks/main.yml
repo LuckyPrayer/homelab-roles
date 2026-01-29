@@ -1,0 +1,168 @@
+---
+# Docker Backup Role - Main Tasks
+# This role fetches backup credentials and ensures restic is installed
+# The actual backup scheduling is handled by homelab-backup.timer from the komodo role
+
+# ============================================================================
+# Fetch secrets from Infisical
+# ============================================================================
+
+- name: Retrieve RESTIC_PASSWORD from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get RESTIC_PASSWORD --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  register: backup_restic_password_result
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+- name: Set RESTIC_PASSWORD fact
+  ansible.builtin.set_fact:
+    backup_restic_password: "{{ backup_restic_password_result.stdout }}"
+  no_log: true
+
+- name: Retrieve B2_ACCOUNT_ID from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get B2_ACCOUNT_ID --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  register: backup_b2_account_id_result
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+- name: Set B2_ACCOUNT_ID fact
+  ansible.builtin.set_fact:
+    backup_b2_account_id: "{{ backup_b2_account_id_result.stdout }}"
+  no_log: true
+
+- name: Retrieve B2_ACCOUNT_KEY from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get B2_ACCOUNT_KEY --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  register: backup_b2_account_key_result
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+- name: Set B2_ACCOUNT_KEY fact
+  ansible.builtin.set_fact:
+    backup_b2_account_key: "{{ backup_b2_account_key_result.stdout }}"
+  no_log: true
+
+- name: Retrieve B2_BUCKET from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get B2_BUCKET --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  register: backup_b2_bucket_result
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+- name: Set B2_BUCKET fact
+  ansible.builtin.set_fact:
+    backup_b2_bucket: "{{ backup_b2_bucket_result.stdout }}"
+  no_log: true
+
+- name: Retrieve DISCORD_WEBHOOK_URL from Infisical (optional)
+  ansible.builtin.shell: |
+    infisical secrets get DISCORD_WEBHOOK_URL --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  register: backup_discord_webhook_result
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+- name: Set DISCORD_WEBHOOK_URL fact
+  ansible.builtin.set_fact:
+    backup_discord_webhook: "{{ backup_discord_webhook_result.stdout | default('') }}"
+
+# ============================================================================
+# Install dependencies
+# ============================================================================
+
+- name: Install backup dependencies
+  ansible.builtin.apt:
+    name:
+      - curl
+      - jq
+      - bzip2
+    state: present
+    update_cache: yes
+  become: true
+
+- name: Install restic
+  ansible.builtin.shell: |
+    if ! command -v restic &> /dev/null; then
+      curl -L https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 -o /tmp/restic.bz2
+      bunzip2 /tmp/restic.bz2
+      mv /tmp/restic /usr/local/bin/restic
+      chmod +x /usr/local/bin/restic
+      echo "changed"
+    else
+      echo "ok"
+    fi
+  register: restic_install
+  changed_when: restic_install.stdout == "changed"
+  become: true
+
+- name: Install yq for config-driven backups
+  ansible.builtin.shell: |
+    if ! command -v yq &> /dev/null; then
+      curl -L https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64 -o /usr/local/bin/yq
+      chmod +x /usr/local/bin/yq
+      echo "changed"
+    else
+      echo "ok"
+    fi
+  register: yq_install
+  changed_when: yq_install.stdout == "changed"
+  become: true
+
+- name: Verify restic installation
+  ansible.builtin.command: restic version
+  register: restic_version
+  changed_when: false
+
+- name: Display restic version
+  ansible.builtin.debug:
+    msg: "Restic installed: {{ restic_version.stdout }}"
+
+# ============================================================================
+# Display backup info
+# ============================================================================
+
+- name: Display backup configuration
+  ansible.builtin.debug:
+    msg:
+      - "Docker backup role configured successfully!"
+      - ""
+      - "Backup scheduling is handled by homelab-backup.timer (from komodo role)"
+      - "Scripts location: /opt/scripts/komodo-backup.sh, /opt/scripts/komodo-restore.sh"
+      - ""
+      - "Manual commands:"
+      - "  - Check timer: systemctl status homelab-backup.timer"
+      - "  - Run backup: sudo /opt/scripts/komodo-backup.sh all full"
+      - "  - Restore: sudo /opt/scripts/komodo-restore.sh <stack> latest"
+
+# ============================================================================
+# Include restore tasks if enabled (for pre-deployment restore)
+# ============================================================================
+
+- name: Include komodo restore tasks
+  ansible.builtin.include_tasks: restore-komodo.yml
+  when: restore_enabled | default(false) | bool

@@ -1,0 +1,64 @@
+---
+# Homelab Compose Role - Main Tasks
+# Deploys Docker containers using per-service compose stacks
+
+- name: Get docker group GID
+  ansible.builtin.command: getent group docker
+  register: docker_group_info
+  changed_when: false
+
+- name: Set docker_gid fact
+  ansible.builtin.set_fact:
+    docker_gid: "{{ docker_group_info.stdout.split(':')[2] }}"
+
+# Create shared network for all stacks
+- name: Create shared homelab network
+  ansible.builtin.command:
+    cmd: docker network create homelab
+  register: network_create
+  changed_when: network_create.rc == 0
+  failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
+  become: true
+
+# Define base stacks directory
+- name: Set stacks directory
+  ansible.builtin.set_fact:
+    stacks_base_dir: /opt/stacks
+
+# Create base stacks directory
+- name: Create base stacks directory
+  ansible.builtin.file:
+    path: "{{ stacks_base_dir }}"
+    state: directory
+    owner: docker-svc
+    group: docker
+    mode: '0750'
+
+# Include stack-specific tasks based on host
+- name: Include orion stack tasks
+  ansible.builtin.include_tasks: stacks-orion.yml
+  when: inventory_hostname in ['orion-dev', 'orion-prod']
+
+- name: Include hephaestus stack tasks
+  ansible.builtin.include_tasks: stacks-hephaestus.yml
+  when: inventory_hostname in ['hephaestus-dev', 'hephaestus-prod']
+
+- name: Include argus stack tasks
+  ansible.builtin.include_tasks: stacks-argus.yml
+  when: inventory_hostname in ['argus-dev', 'argus-prod']
+
+# Create systemd service for managing all stacks
+- name: Create systemd unit for managing all stacks
+  ansible.builtin.template:
+    src: homelab-stacks.service.j2
+    dest: /etc/systemd/system/homelab-stacks.service
+    mode: '0644'
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: Enable homelab-stacks service
+  ansible.builtin.systemd:
+    name: homelab-stacks.service
+    enabled: yes

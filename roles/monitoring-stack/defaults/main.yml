@@ -1,0 +1,51 @@
+---
+# Monitoring Stack - Default Variables
+
+# Grafana Configuration
+grafana_enabled: true
+grafana_port: 3000
+grafana_admin_user: "admin"
+grafana_admin_password: ""  # Fetched from Infisical
+grafana_image: "grafana/grafana:11.3.0"
+
+# Prometheus Configuration
+prometheus_enabled: true
+prometheus_port: 9090
+prometheus_retention_days: 30
+prometheus_scrape_interval: "15s"
+prometheus_evaluation_interval: "15s"
+prometheus_image: "prom/prometheus:v2.54.1"
+prometheus_scrape_targets: []
+
+# Loki Configuration
+loki_enabled: true
+loki_port: 3100
+loki_retention_days: 30
+loki_image: "grafana/loki:3.2.0"
+
+# Alertmanager Configuration
+alertmanager_enabled: true
+alertmanager_port: 9093
+alertmanager_image: "prom/alertmanager:v0.27.0"
+alertmanager_discord_webhook: ""  # Set to http://hephaestus-{{ env }}:8085/webhook/alert
+
+# Alloy Configuration (local log collection - replaces Promtail)
+alloy_enabled: true
+alloy_port: 12345
+alloy_image: "grafana/alloy:v1.5.1"
+
+# Node Exporter (for host metrics)
+node_exporter_enabled: true
+node_exporter_port: 9100
+node_exporter_image: "prom/node-exporter:v1.8.2"
+
+# cAdvisor (for container metrics)
+cadvisor_enabled: true
+cadvisor_port: 8081  # Use 8081 to avoid conflict with other services
+cadvisor_image: "gcr.io/cadvisor/cadvisor:v0.49.1"
+
+# Docker socket for container monitoring
+docker_socket_path: "/var/run/docker.sock"
+
+# Infisical paths for secrets
+monitoring_infisical_path: "/infrastructure/monitoring"

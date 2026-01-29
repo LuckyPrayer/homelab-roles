@@ -1,0 +1,126 @@
+---
+# GitHub Actions Self-Hosted Runner Role
+# Deploys and configures a GitHub Actions runner as a systemd service
+
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - github_runner_repo_url is defined
+      - github_runner_token is defined
+    fail_msg: "github_runner_repo_url and github_runner_token must be defined"
+
+- name: Install runner dependencies
+  ansible.builtin.package:
+    name:
+      - curl
+      - tar
+      - libicu
+      - git
+      - jq
+    state: present
+
+- name: Create runner user
+  ansible.builtin.user:
+    name: "{{ github_runner_user }}"
+    comment: "GitHub Actions Runner"
+    shell: /bin/bash
+    create_home: yes
+    groups: "{{ github_runner_groups }}"
+    append: yes
+  register: runner_user
+
+- name: Create runner directory
+  ansible.builtin.file:
+    path: "{{ github_runner_dir }}"
+    state: directory
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+    mode: '0755'
+
+- name: Get latest runner version
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/actions/runner/releases/latest
+    return_content: yes
+  register: runner_release
+  when: github_runner_version == 'latest'
+
+- name: Set runner version
+  ansible.builtin.set_fact:
+    runner_version: "{{ (github_runner_version == 'latest') | ternary(runner_release.json.tag_name | regex_replace('^v', ''), github_runner_version) }}"
+
+- name: Check if runner is already installed
+  ansible.builtin.stat:
+    path: "{{ github_runner_dir }}/config.sh"
+  register: runner_installed
+
+- name: Download runner package
+  ansible.builtin.get_url:
+    url: "https://github.com/actions/runner/releases/download/v{{ runner_version }}/actions-runner-linux-{{ github_runner_arch }}-{{ runner_version }}.tar.gz"
+    dest: "/tmp/actions-runner-{{ runner_version }}.tar.gz"
+    mode: '0644'
+  when: not runner_installed.stat.exists
+
+- name: Extract runner package
+  ansible.builtin.unarchive:
+    src: "/tmp/actions-runner-{{ runner_version }}.tar.gz"
+    dest: "{{ github_runner_dir }}"
+    remote_src: yes
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+  when: not runner_installed.stat.exists
+
+- name: Check if runner is already configured
+  ansible.builtin.stat:
+    path: "{{ github_runner_dir }}/.runner"
+  register: runner_configured
+
+- name: Configure runner
+  ansible.builtin.command:
+    cmd: >
+      ./config.sh
+      --url {{ github_runner_repo_url }}
+      --token {{ github_runner_token }}
+      --name {{ github_runner_name }}
+      --labels {{ github_runner_labels | join(',') }}
+      --work {{ github_runner_work_dir }}
+      --unattended
+      --replace
+    chdir: "{{ github_runner_dir }}"
+  become: yes
+  become_user: "{{ github_runner_user }}"
+  when: not runner_configured.stat.exists or github_runner_force_reconfigure
+  no_log: true  # Hide token from logs
+
+- name: Install runner service
+  ansible.builtin.command:
+    cmd: ./svc.sh install {{ github_runner_user }}
+    chdir: "{{ github_runner_dir }}"
+  when: not runner_configured.stat.exists or github_runner_force_reconfigure
+
+- name: Start runner service
+  ansible.builtin.command:
+    cmd: ./svc.sh start
+    chdir: "{{ github_runner_dir }}"
+  when: not runner_configured.stat.exists or github_runner_force_reconfigure
+
+- name: Ensure runner service is enabled and running
+  ansible.builtin.systemd:
+    name: "actions.runner.{{ github_runner_repo_name }}.{{ github_runner_name }}"
+    state: started
+    enabled: yes
+  ignore_errors: yes  # Service name may vary
+
+- name: Clean up downloaded archive
+  ansible.builtin.file:
+    path: "/tmp/actions-runner-{{ runner_version }}.tar.gz"
+    state: absent
+
+- name: Display runner status
+  ansible.builtin.debug:
+    msg: |
+      GitHub Actions Runner installed successfully!
+      - User: {{ github_runner_user }}
+      - Directory: {{ github_runner_dir }}
+      - Name: {{ github_runner_name }}
+      - Labels: {{ github_runner_labels | join(', ') }}
+      - Repository: {{ github_runner_repo_url }}

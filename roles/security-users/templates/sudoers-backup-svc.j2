@@ -1,0 +1,20 @@
+# Sudoers configuration for backup-svc user
+# Provides minimum required privileges for backup operations
+
+Defaults:backup-svc !requiretty
+
+# Restic backup tool
+backup-svc ALL=(root) NOPASSWD: /usr/local/bin/restic *
+
+# Docker container management (for backup operations)
+backup-svc ALL=(root) NOPASSWD: /usr/bin/docker ps *
+backup-svc ALL=(root) NOPASSWD: /usr/bin/docker inspect *
+backup-svc ALL=(root) NOPASSWD: /usr/bin/docker stop *
+backup-svc ALL=(root) NOPASSWD: /usr/bin/docker start *
+backup-svc ALL=(root) NOPASSWD: /usr/bin/docker compose *
+backup-svc ALL=(root) NOPASSWD: /usr/bin/docker-compose *
+
+# File operations on backup directories only
+backup-svc ALL=(root) NOPASSWD: /usr/bin/tar *
+backup-svc ALL=(root) NOPASSWD: /usr/bin/chown -R backup-svc\:docker /opt/docker-backups/*
+backup-svc ALL=(root) NOPASSWD: /usr/bin/chmod -R * /opt/docker-backups/*

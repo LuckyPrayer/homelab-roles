@@ -1,0 +1,312 @@
+---
+# Security Users Role - Main Tasks
+# Creates dedicated service accounts, human users, and configures sudoers for least privilege
+
+- name: Ensure docker group exists (will be used by Docker when installed)
+  ansible.builtin.group:
+    name: docker
+    state: present
+    system: yes
+  become: true
+
+- name: Ensure sudo group exists
+  ansible.builtin.group:
+    name: sudo
+    state: present
+  become: true
+
+# ============================================================================
+# Human Users from Infisical /users/{username}/
+# ============================================================================
+
+- name: Fetch SSH_PUBLIC_KEY for human users
+  ansible.builtin.shell: |
+    infisical secrets get SSH_PUBLIC_KEY \
+      --path="{{ item.infisical_path }}" \
+      --plain --silent \
+      --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" \
+      --env="{{ infisical_env_slug | default('dev') }}"
+  register: human_user_ssh_keys
+  loop: "{{ human_users | default([]) }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+
+- name: Fetch GROUPS for human users
+  ansible.builtin.shell: |
+    infisical secrets get GROUPS \
+      --path="{{ item.infisical_path }}" \
+      --plain --silent \
+      --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" \
+      --env="{{ infisical_env_slug | default('dev') }}"
+  register: human_user_groups
+  loop: "{{ human_users | default([]) }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+
+- name: Fetch SHELL for human users
+  ansible.builtin.shell: |
+    infisical secrets get SHELL \
+      --path="{{ item.infisical_path }}" \
+      --plain --silent \
+      --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" \
+      --env="{{ infisical_env_slug | default('dev') }}"
+  register: human_user_shells
+  loop: "{{ human_users | default([]) }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+
+- name: Fetch SUDO_ACCESS for human users
+  ansible.builtin.shell: |
+    infisical secrets get SUDO_ACCESS \
+      --path="{{ item.infisical_path }}" \
+      --plain --silent \
+      --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" \
+      --env="{{ infisical_env_slug | default('dev') }}"
+  register: human_user_sudo
+  loop: "{{ human_users | default([]) }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+
+- name: Create human user accounts
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    uid: "{{ item.uid }}"
+    groups: "{{ (human_user_groups.results[idx].stdout | default('') | split(',') | map('trim') | select() | list) if human_user_groups.results[idx].rc == 0 else [] }}"
+    home: "/home/{{ item.name }}"
+    shell: "{{ human_user_shells.results[idx].stdout | default('/bin/bash') if human_user_shells.results[idx].rc == 0 else '/bin/bash' }}"
+    comment: "{{ item.comment | default('Human User') }}"
+    create_home: yes
+    state: present
+  loop: "{{ human_users | default([]) }}"
+  loop_control:
+    index_var: idx
+  become: true
+
+- name: Create .ssh directory for human users
+  ansible.builtin.file:
+    path: "/home/{{ item.name }}/.ssh"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: '0700'
+  loop: "{{ human_users | default([]) }}"
+  loop_control:
+    index_var: idx
+  when: 
+    - human_user_ssh_keys.results[idx].rc == 0
+    - human_user_ssh_keys.results[idx].stdout | length > 0
+  become: true
+
+- name: Add SSH authorized key for human users
+  ansible.posix.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ human_user_ssh_keys.results[idx].stdout }}"
+    state: present
+    exclusive: false
+  loop: "{{ human_users | default([]) }}"
+  loop_control:
+    index_var: idx
+  when:
+    - human_user_ssh_keys.results[idx].rc == 0
+    - human_user_ssh_keys.results[idx].stdout | length > 0
+  become: true
+
+- name: Configure sudoers for human users with sudo access
+  ansible.builtin.template:
+    src: sudoers-human-user.j2
+    dest: "{{ sudoers_dir }}/{{ item.name }}"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  loop: "{{ human_users | default([]) }}"
+  loop_control:
+    index_var: idx
+  when:
+    - configure_sudoers | bool
+    - human_user_sudo.results[idx].rc == 0
+    - human_user_sudo.results[idx].stdout | lower == 'true'
+  become: true
+
+# ============================================================================
+# Service Users (system accounts for services)
+# ============================================================================
+
+- name: Create service user groups
+  ansible.builtin.group:
+    name: "{{ item.name }}"
+    gid: "{{ item.uid }}"
+    system: "{{ item.system | default(true) }}"
+    state: present
+  loop: "{{ service_users }}"
+  become: true
+
+- name: Create service user accounts
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    uid: "{{ item.uid }}"
+    group: "{{ item.name }}"
+    groups: "{{ item.groups | default([]) }}"
+    home: "{{ item.home }}"
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    system: "{{ item.system | default(true) }}"
+    comment: "{{ item.comment | default('Service Account') }}"
+    create_home: yes
+    state: present
+  loop: "{{ service_users }}"
+  become: true
+
+- name: Ensure service user home directories exist with correct permissions
+  ansible.builtin.file:
+    path: "{{ item.home }}"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: '0750'
+  loop: "{{ service_users }}"
+  become: true
+
+# Fetch and configure SSH keys from Infisical for service users
+- name: Fetch SSH public key from Infisical for service users
+  ansible.builtin.shell: |
+    infisical secrets get SSH_PUBLIC_KEY \
+      --path="{{ item.ssh_key_infisical_path }}" \
+      --plain --silent \
+      --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" \
+      --env="{{ infisical_env_slug | default('dev') }}"
+  register: service_user_ssh_keys
+  loop: "{{ service_users | selectattr('ssh_key_infisical_path', 'defined') | list }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+
+- name: Create .ssh directory for service users with SSH keys
+  ansible.builtin.file:
+    path: "{{ item.item.home }}/.ssh"
+    state: directory
+    owner: "{{ item.item.name }}"
+    group: "{{ item.item.name }}"
+    mode: '0700'
+  loop: "{{ service_user_ssh_keys.results | default([]) }}"
+  when: 
+    - item.rc == 0
+    - item.stdout | length > 0
+  become: true
+
+- name: Add SSH authorized key for service users
+  ansible.posix.authorized_key:
+    user: "{{ item.item.name }}"
+    key: "{{ item.stdout }}"
+    state: present
+    exclusive: false
+  loop: "{{ service_user_ssh_keys.results | default([]) }}"
+  when:
+    - item.rc == 0
+    - item.stdout | length > 0
+  become: true
+
+- name: Create ansible user (if enabled)
+  ansible.builtin.user:
+    name: "{{ custom_ansible_user_name }}"
+    uid: "{{ custom_ansible_user_uid }}"
+    groups: "{{ custom_ansible_user_groups }}"
+    shell: "{{ custom_ansible_user_shell }}"
+    comment: "Ansible Automation User"
+    create_home: yes
+    state: present
+  when: create_ansible_user | bool
+  become: true
+
+- name: Add SSH key for ansible user
+  ansible.posix.authorized_key:
+    user: "{{ custom_ansible_user_name }}"
+    key: "{{ custom_ansible_user_ssh_key }}"
+    state: present
+  when: 
+    - create_ansible_user | bool
+    - custom_ansible_user_ssh_key | length > 0
+  become: true
+
+- name: Configure sudoers for ansible user
+  ansible.builtin.template:
+    src: sudoers-ansible.j2
+    dest: "{{ sudoers_dir }}/ansible-user"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  when: configure_sudoers | bool
+  become: true
+
+- name: Configure sudoers for backup service user
+  ansible.builtin.template:
+    src: sudoers-backup-svc.j2
+    dest: "{{ sudoers_dir }}/backup-svc"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  when: configure_sudoers | bool
+  become: true
+
+- name: Configure sudoers for docker service user
+  ansible.builtin.template:
+    src: sudoers-docker-svc.j2
+    dest: "{{ sudoers_dir }}/docker-svc"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  when: configure_sudoers | bool
+  become: true
+
+- name: Configure SSH security settings
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+    validate: 'sshd -t -f %s'
+  loop:
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin {{ "no" if disable_root_ssh else "yes" }}' }
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication {{ "yes" if ssh_password_authentication else "no" }}' }
+    - { regexp: '^#?PermitEmptyPasswords', line: 'PermitEmptyPasswords no' }
+    - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
+  become: true
+  notify: Restart sshd
+
+- name: Display service accounts created
+  ansible.builtin.debug:
+    msg: |
+      Human users created:
+      {% for user in human_users | default([]) %}
+      - {{ user.name }} (UID: {{ user.uid }})
+      {% endfor %}
+      
+      Service accounts created:
+      {% for user in service_users %}
+      - {{ user.name }} (UID: {{ user.uid }})
+      {% endfor %}
+      {% if create_ansible_user %}
+      - {{ custom_ansible_user_name }} (UID: {{ custom_ansible_user_uid }})
+      {% endif %}
+      
+      Security improvements applied:
+      - Human users from Infisical /users/
+      - Dedicated service accounts for Docker services
+      - Least privilege sudoers configuration
+      - SSH key-based authentication
+      {% if disable_root_ssh %}
+      - Root SSH login disabled
+      {% else %}
+      - Root SSH login still enabled (set disable_root_ssh: true to disable)
+      {% endif %}

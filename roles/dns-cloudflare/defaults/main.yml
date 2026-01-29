@@ -1,0 +1,50 @@
+---
+# Cloudflare DNS automation defaults
+
+# Infisical configuration for retrieving Cloudflare API token
+# The token is stored in Infisical at: /infrastructure/dns/cloudflare
+# Secret name: CLOUDFLARE_API_TOKEN
+cloudflare_infisical_path: "/infrastructure/dns/cloudflare/"
+cloudflare_infisical_env: "prod"  # Environment in Infisical (prod/dev)
+
+# Cloudflare API token (retrieved from Infisical at runtime)
+# No longer read from environment variable for security
+cloudflare_api_token_secret: ""  # Set at runtime from Infisical
+
+# Domain/zone to manage
+cloudflare_zone: "thebozic.com"
+
+# Cloudflare DNS records to create/update
+# This is populated from inventory group_vars, but can be overridden
+# Note: This is separate from 'dns_records' which is used for local Pi-hole DNS
+cloudflare_dns_records: []
+# Example:
+# cloudflare_dns_records:
+#   - name: "*.dev.thebozic.com"
+#     type: "A"
+#     content: "192.168.20.100"
+#     proxied: false
+#     ttl: 300
+#   - name: "*.prod.thebozic.com"
+#     type: "A"
+#     content: "YOUR_PUBLIC_IP"
+#     proxied: true
+#     ttl: 1
+
+# Auto-generate DNS records from inventory
+auto_generate_dns_records: true
+
+# DNS record TTL (1 = auto, 300-86400 = seconds)
+dns_ttl: 300
+
+# Cloudflare proxy (orange cloud)
+# true = traffic goes through Cloudflare
+# false = direct to your IP
+dns_proxied: false
+
+# For public access to production, you'll need your public IP
+public_ip: "{{ lookup('env', 'PUBLIC_IP') | default('', true) }}"
+
+# DNS record types
+dns_record_type_internal: "A"  # Internal IPs
+dns_record_type_external: "A"  # External/public IPs

@@ -1,0 +1,19 @@
+# {{ item.name }} - {{ item.description | default('VLAN-aware bridge') }}
+auto {{ item.name }}
+iface {{ item.name }} inet {{ item.type | default('manual') }}
+{% if item.address is defined %}
+        address {{ item.address }}
+{% endif %}
+{% if item.gateway is defined %}
+        gateway {{ item.gateway }}
+{% endif %}
+        bridge-ports {{ item.ports | default('none') }}
+        bridge-stp {{ item.stp | default('off') }}
+        bridge-fd {{ item.fd | default('0') }}
+{% if item.vlan_aware | default(true) %}
+        bridge-vlan-aware yes
+        bridge-vids {{ item.vlan_range | default('2-4094') }}
+{% endif %}
+{% if item.mtu is defined %}
+        mtu {{ item.mtu }}
+{% endif %}

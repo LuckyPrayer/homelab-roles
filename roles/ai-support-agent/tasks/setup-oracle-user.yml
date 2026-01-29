@@ -1,0 +1,65 @@
+---
+# Setup Oracle user on remote hosts for SSH access
+# This task file should be included by a playbook that runs on all docker hosts
+
+- name: Check if oracle group exists
+  ansible.builtin.getent:
+    database: group
+    key: oracle
+  register: oracle_group_check
+  ignore_errors: true
+
+- name: Create oracle group on remote host
+  ansible.builtin.group:
+    name: oracle
+    gid: 3100
+    state: present
+  when: oracle_group_check.failed | default(false) or 'oracle' not in (oracle_group_check.ansible_facts.getent_group | default({}))
+
+- name: Check if oracle user exists
+  ansible.builtin.getent:
+    database: passwd
+    key: oracle
+  register: oracle_user_check
+  ignore_errors: true
+
+- name: Create oracle user on remote host
+  ansible.builtin.user:
+    name: oracle
+    uid: 3100
+    group: oracle
+    home: /home/oracle
+    shell: /bin/bash
+    create_home: yes
+    comment: "Oracle AI Support Agent"
+    state: present
+  when: oracle_user_check.failed | default(false) or 'oracle' not in (oracle_user_check.ansible_facts.getent_passwd | default({}))
+
+- name: Add oracle user to docker group
+  ansible.builtin.user:
+    name: oracle
+    groups: docker
+    append: yes
+
+- name: Create .ssh directory for oracle
+  ansible.builtin.file:
+    path: /home/oracle/.ssh
+    state: directory
+    owner: oracle
+    group: oracle
+    mode: '0700'
+
+- name: Add Oracle public key to authorized_keys
+  ansible.builtin.authorized_key:
+    user: oracle
+    state: present
+    key: "{{ oracle_ssh_public_key }}"
+  when: oracle_ssh_public_key is defined and oracle_ssh_public_key | length > 0
+
+- name: Allow oracle user to run docker commands without sudo
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers.d/oracle
+    line: "oracle ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker-compose"
+    create: yes
+    mode: '0440'
+    validate: 'visudo -cf %s'

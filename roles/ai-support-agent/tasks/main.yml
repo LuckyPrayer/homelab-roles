@@ -1,0 +1,221 @@
+---
+# Oracle AI Support Agent Role - Main Tasks
+# Deploys Oracle, the Homelab AI Support Agent using Claude Code CLI
+
+- name: Include Infisical secrets
+  ansible.builtin.include_tasks: infisical.yml
+  when: oracle_use_infisical | default(true)
+
+# === Oracle User Setup ===
+- name: Create oracle group
+  ansible.builtin.group:
+    name: "{{ oracle_user | default('oracle') }}"
+    gid: "{{ oracle_gid | default(3003) }}"
+    state: present
+
+- name: Create oracle user
+  ansible.builtin.user:
+    name: "{{ oracle_user | default('oracle') }}"
+    uid: "{{ oracle_uid | default(3003) }}"
+    group: "{{ oracle_user | default('oracle') }}"
+    home: "{{ oracle_home | default('/home/oracle') }}"
+    shell: /bin/bash
+    create_home: yes
+    state: present
+
+- name: Add oracle user to docker group
+  ansible.builtin.user:
+    name: "{{ oracle_user | default('oracle') }}"
+    groups: docker
+    append: yes
+  ignore_errors: true
+
+# === Oracle Directory Structure ===
+- name: Create Oracle directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ oracle_user | default('oracle') }}"
+    group: "{{ oracle_user | default('oracle') }}"
+    mode: '0755'
+  loop:
+    - /opt/oracle
+    - /opt/oracle/logs
+    - "{{ oracle_home | default('/home/oracle') }}/.ssh"
+
+# === SSH Key Setup ===
+- name: Write Oracle SSH private key from Infisical
+  ansible.builtin.copy:
+    content: "{{ oracle_ssh_private_key }}\n"
+    dest: "{{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519"
+    owner: "{{ oracle_user | default('oracle') }}"
+    group: "{{ oracle_user | default('oracle') }}"
+    mode: '0600'
+  when: oracle_ssh_private_key is defined and oracle_ssh_private_key | length > 0
+  no_log: true
+
+- name: Generate Oracle SSH public key from private key
+  ansible.builtin.shell: |
+    ssh-keygen -y -f {{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519 > {{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519.pub
+    chown {{ oracle_user | default('oracle') }}:{{ oracle_user | default('oracle') }} {{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519.pub
+    chmod 644 {{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519.pub
+  when: oracle_ssh_private_key is defined and oracle_ssh_private_key | length > 0
+  changed_when: true
+
+- name: Create SSH config for Oracle remote access
+  ansible.builtin.copy:
+    dest: /opt/oracle/ssh_config
+    owner: "{{ oracle_user | default('oracle') }}"
+    group: "{{ oracle_user | default('oracle') }}"
+    mode: '0644'
+    content: |
+      # SSH config for Oracle AI Agent remote diagnostics
+      # Allows passwordless SSH to homelab hosts via jump host
+      
+      Host hermes hermes-dev jump
+          HostName 192.168.2.10
+          User oracle
+          IdentityFile ~/.ssh/id_ed25519
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+          LogLevel ERROR
+      
+      Host orion orion-dev
+          HostName 192.168.20.100
+          User oracle
+          IdentityFile ~/.ssh/id_ed25519
+          ProxyJump hermes-dev
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+          LogLevel ERROR
+      
+      Host hephaestus hephaestus-dev
+          HostName 192.168.20.200
+          User oracle
+          IdentityFile ~/.ssh/id_ed25519
+          ProxyJump hermes-dev
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+          LogLevel ERROR
+      
+      Host argus argus-dev
+          HostName 192.168.20.50
+          User oracle
+          IdentityFile ~/.ssh/id_ed25519
+          ProxyJump hermes-dev
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+          LogLevel ERROR
+      
+      # Default settings for all VLAN 20 hosts
+      Host 192.168.20.*
+          User oracle
+          IdentityFile ~/.ssh/id_ed25519
+          ProxyJump hermes-dev
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+          LogLevel ERROR
+      
+      # Default settings
+      Host *
+          IdentityFile ~/.ssh/id_ed25519
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+          LogLevel ERROR
+  notify: Restart Oracle
+
+# === Application Files ===
+- name: Copy Oracle agent source files
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ oracle_user | default('oracle') }}"
+    group: "{{ oracle_user | default('oracle') }}"
+    mode: '0644'
+  loop:
+    - { src: "agent/main.py", dest: "/opt/oracle/main.py" }
+    - { src: "agent/config.py", dest: "/opt/oracle/config.py" }
+    - { src: "agent/requirements.txt", dest: "/opt/oracle/requirements.txt" }
+    - { src: "agent/Dockerfile", dest: "/opt/oracle/Dockerfile" }
+  notify: Restart Oracle
+
+- name: Template docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/oracle/docker-compose.yml
+    owner: "{{ oracle_user | default('oracle') }}"
+    group: "{{ oracle_user | default('oracle') }}"
+    mode: '0644'
+  notify: Restart Oracle
+
+- name: Template .env file
+  ansible.builtin.template:
+    src: env.j2
+    dest: /opt/oracle/.env
+    owner: "{{ oracle_user | default('oracle') }}"
+    group: "{{ oracle_user | default('oracle') }}"
+    mode: '0600'
+  notify: Restart Oracle
+
+# === Codebase Sync ===
+- name: Ensure rsync is installed on remote host
+  ansible.builtin.apt:
+    name: rsync
+    state: present
+    update_cache: yes
+  when: oracle_sync_codebase | default(false)
+
+- name: Create codebase directory
+  ansible.builtin.file:
+    path: "{{ oracle_codebase_path | default('/opt/homelab') }}"
+    state: directory
+    owner: "{{ oracle_user | default('oracle') }}"
+    group: "{{ oracle_user | default('oracle') }}"
+    mode: '0755'
+  when: oracle_sync_codebase | default(false)
+
+- name: Sync homelab codebase to remote host
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../"
+    dest: "{{ oracle_codebase_path | default('/opt/homelab') }}"
+    recursive: yes
+    delete: no
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=*.pyc"
+      - "--exclude=__pycache__"
+      - "--exclude=.env"
+      - "--exclude=*.log"
+  when: oracle_sync_codebase | default(false)
+
+# === Docker Build and Run ===
+- name: Build Oracle Docker image
+  ansible.builtin.command:
+    cmd: docker build -t {{ oracle_image | default('homelab-oracle:latest') }} .
+    chdir: /opt/oracle
+  when: oracle_build_local | default(true)
+  changed_when: true
+
+- name: Ensure homelab network exists
+  ansible.builtin.command:
+    cmd: docker network create homelab
+  register: network_create
+  changed_when: network_create.rc == 0
+  failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
+
+- name: Pull Oracle image (if not building locally)
+  ansible.builtin.command:
+    cmd: docker compose pull
+    chdir: /opt/oracle
+  when: not (oracle_build_local | default(true))
+  changed_when: true
+
+- name: Start Oracle container
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: /opt/oracle
+  changed_when: true
+
+- name: Display Oracle status
+  ansible.builtin.debug:
+    msg: "Oracle container started"

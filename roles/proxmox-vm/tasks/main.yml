@@ -1,0 +1,322 @@
+---
+# This role provisions VMs from cloud-init templates created by proxmox-cloud-init-template role
+
+- name: Set Proxmox SSH key path
+  ansible.builtin.set_fact:
+    proxmox_ssh_key_path: "{{ playbook_dir }}/../.ssh-keys/proxmox-ci"
+  delegate_to: localhost
+  run_once: true
+
+- name: Retrieve PROXMOX_TOKEN_ID from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get PROXMOX_TOKEN_ID --path="/users/ansible/proxmox" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env=prod
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  register: proxmox_token_id
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  failed_when: proxmox_token_id.stdout == ""
+
+- name: Retrieve PROXMOX_TOKEN_SECRET from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get PROXMOX_TOKEN_SECRET --path="/users/ansible/proxmox" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env=prod
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  register: proxmox_token_secret
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  failed_when: proxmox_token_secret.stdout == ""
+  no_log: true
+
+- name: Determine base VM name (without environment suffix)
+  ansible.builtin.set_fact:
+    vm_base_name: "{{ vm_name | regex_replace('-' + (env | default('dev')) + '$', '') }}"
+
+- name: Retrieve VM_CI_USER from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get VM_CI_USER --path="/infrastructure/vms/{{ vm_base_name }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  register: infisical_vm_ci_user
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: infisical_vm_ci_user.stdout == ""
+
+- name: Retrieve VM_CI_PASSWORD from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get VM_CI_PASSWORD --path="/infrastructure/vms/{{ vm_base_name }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  register: infisical_vm_ci_password
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: infisical_vm_ci_password.stdout == ""
+  no_log: true
+
+- name: Retrieve VM_CI_SSH_KEY from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get VM_CI_SSH_KEY --path="/infrastructure/vms/{{ vm_base_name }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  register: infisical_vm_ci_ssh_key
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: infisical_vm_ci_ssh_key.stdout == ""
+  no_log: true
+
+- name: Set virtual environment path for proxmoxer
+  ansible.builtin.set_fact:
+    venv_path: "{{ playbook_dir }}/../.venv"
+  delegate_to: localhost
+  run_once: true
+
+- name: Check if virtual environment exists
+  ansible.builtin.stat:
+    path: "{{ venv_path }}/bin/pip"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: venv_check
+
+- name: Create virtual environment if not exists
+  ansible.builtin.command:
+    cmd: python3 -m venv {{ venv_path }}
+    creates: "{{ venv_path }}/bin/activate"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: not venv_check.stat.exists
+
+- name: Ensure proxmoxer library is installed on control node
+  ansible.builtin.pip:
+    name:
+      - proxmoxer
+      - requests
+    state: present
+    virtualenv: "{{ venv_path }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Clone VM from cloud-init template
+  community.general.proxmox_kvm:
+    api_user: ansible@pve
+    api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
+    api_token_id: "{{ proxmox_token_id.stdout }}"
+    api_token_secret: "{{ proxmox_token_secret.stdout }}"
+    node: "{{ proxmox_node }}"
+    name: "{{ vm_name }}"
+    clone: "{{ vm_template_name | default('debian-13-generic-dev') }}"
+    full: true
+    state: present
+    onboot: true
+    timeout: 300
+    validate_certs: false
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ venv_path }}/bin/python"
+  register: proxvm
+
+- name: Configure VM resources (CPU, Memory, Boot settings)
+  community.general.proxmox_kvm:
+    api_user: ansible@pve
+    api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
+    api_token_id: "{{ proxmox_token_id.stdout }}"
+    api_token_secret: "{{ proxmox_token_secret.stdout }}"
+    node: "{{ proxmox_node }}"
+    name: "{{ vm_name }}"
+    cores: "{{ vm_cpu_cores }}"
+    memory: "{{ vm_memory_mb }}"
+    onboot: "{{ vm_onboot | default(true) }}"
+    validate_certs: false
+    update: true
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ venv_path }}/bin/python"
+
+- name: Configure VM primary network interface (net0)
+  community.general.proxmox_kvm:
+    api_user: ansible@pve
+    api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
+    api_token_id: "{{ proxmox_token_id.stdout }}"
+    api_token_secret: "{{ proxmox_token_secret.stdout }}"
+    node: "{{ proxmox_node }}"
+    name: "{{ vm_name }}"
+    net:
+      net0: "virtio,bridge={{ vm_bridge }}{{ ',tag=' + (vm_vlan | string) if vm_vlan is not none and vm_vlan != '' else '' }}"
+    validate_certs: false
+    update: true
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ venv_path }}/bin/python"
+
+- name: Get VM ID for additional interface configuration
+  ansible.builtin.command:
+    cmd: ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no root@{{ hostvars[groups['proxmox'][0]]['ansible_host'] }} qm list
+  register: qm_list_result
+  delegate_to: localhost
+  when:
+    - vm_additional_interfaces is defined
+    - vm_additional_interfaces | length > 0
+  changed_when: false
+
+- name: Parse VM ID from qm list output
+  ansible.builtin.set_fact:
+    vm_id: "{{ qm_list_result.stdout_lines | select('search', vm_name) | first | split() | first }}"
+  when:
+    - vm_additional_interfaces is defined
+    - vm_additional_interfaces | length > 0
+    - qm_list_result.stdout_lines is defined
+
+- name: Configure additional network interfaces using qm command
+  ansible.builtin.command:
+    cmd: ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no root@{{ hostvars[groups['proxmox'][0]]['ansible_host'] }} qm set {{ vm_id }} --{{ iface.key }} {{ iface.value }}
+  loop: "{{ vm_additional_interfaces | dict2items }}"
+  loop_control:
+    loop_var: iface
+  delegate_to: localhost
+  when:
+    - vm_additional_interfaces is defined
+    - vm_additional_interfaces | length > 0
+    - vm_id is defined
+    - vm_id | length > 0
+  register: qm_result
+  changed_when: qm_result.rc == 0
+
+- name: Resize primary disk if needed
+  when: vm_override_disk | bool
+  community.general.proxmox_disk:
+    api_user: ansible@pve
+    api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
+    api_token_id: "{{ proxmox_token_id.stdout }}"
+    api_token_secret: "{{ proxmox_token_secret.stdout }}"
+    vmid: "{{ proxvm.vmid }}"
+    disk: scsi0
+    size: "{{ vm_disk_gb }}G"
+    state: resized
+    validate_certs: false
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ venv_path }}/bin/python"
+
+- name: Configure cloud-init (user, password and SSH keys)
+  community.general.proxmox_kvm:
+    api_user: ansible@pve
+    api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
+    api_token_id: "{{ proxmox_token_id.stdout }}"
+    api_token_secret: "{{ proxmox_token_secret.stdout }}"
+    node: "{{ proxmox_node }}"
+    name: "{{ vm_name }}"
+    ciuser: "{{ infisical_vm_ci_user.stdout }}"
+    cipassword: "{{ infisical_vm_ci_password.stdout }}"
+    sshkeys: "{{ infisical_vm_ci_ssh_key.stdout }}"
+    agent: 1
+    validate_certs: false
+    update: true
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ venv_path }}/bin/python"
+
+- name: Configure static IP via cloud-init
+  when: vm_ip is not none and vm_ip != ''
+  community.general.proxmox_kvm:
+    api_user: ansible@pve
+    api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
+    api_token_id: "{{ proxmox_token_id.stdout }}"
+    api_token_secret: "{{ proxmox_token_secret.stdout }}"
+    node: "{{ proxmox_node }}"
+    name: "{{ vm_name }}"
+    ipconfig:
+      ipconfig0: ip={{ vm_ip }}/{{ vm_net_prefix }},gw={{ vm_net_gateway }}
+    nameservers: "{{ vm_nameserver | default(vm_net_gateway) }}"
+    validate_certs: false
+    update: true
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ venv_path }}/bin/python"
+
+- name: Start VM
+  community.general.proxmox_kvm:
+    api_user: ansible@pve
+    api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
+    api_token_id: "{{ proxmox_token_id.stdout }}"
+    api_token_secret: "{{ proxmox_token_secret.stdout }}"
+    node: "{{ proxmox_node }}"
+    name: "{{ vm_name }}"
+    validate_certs: false
+    state: started
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ venv_path }}/bin/python"
+
+- name: Wait for VM to start and network to initialize
+  ansible.builtin.pause:
+    seconds: 5
+  when: vm_vlan is defined and vm_vlan != ''
+
+- name: Configure VLAN on bridge for VM tap interface
+  ansible.builtin.shell:
+    cmd: |
+      ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no root@{{ hostvars[groups['proxmox'][0]]['ansible_host'] }} \
+        "bridge vlan add vid {{ vm_vlan }} dev tap{{ proxvm.vmid }}i0 pvid untagged && \
+         bridge vlan del vid 1 dev tap{{ proxvm.vmid }}i0"
+  delegate_to: localhost
+  when: 
+    - vm_vlan is defined 
+    - vm_vlan != ''
+    - vm_vlan != 'none'
+    - proxvm.vmid is defined
+  changed_when: true
+  ignore_errors: yes
+
+- name: Wait for SSH to be available (management network VMs only)
+  ansible.builtin.wait_for:
+    host: "{{ vm_ip }}"
+    port: 22
+    delay: 10
+    timeout: 300
+    sleep: 5
+  delegate_to: localhost
+  when:
+    - vm_vlan | string == '' or vm_vlan | string == 'none'
+    - hostvars[vm_name].get('ansible_ssh_common_args', '') | regex_search('ProxyJump') is none
+  register: ssh_wait
+  changed_when: false
+
+- name: Note about SSH wait for VLAN VMs
+  ansible.builtin.debug:
+    msg:
+      - "⏭️  Skipping SSH wait for VLAN VM {{ vm_name }}"
+      - "   SSH connectivity will be verified in the dedicated wait phase"
+      - "   (This VM requires ProxyJump through router to reach VLAN {{ vm_vlan }})"
+  when:
+    - vm_vlan | string != '' and vm_vlan | string != 'none'
+    - hostvars[vm_name].get('ansible_ssh_common_args', '') | regex_search('ProxyJump') is not none
+
+- name: Add new VM to docker_hosts group at runtime
+  ansible.builtin.add_host:
+    name: "{{ vm_name }}"
+    groups: docker_hosts
+    ansible_host: "{{ vm_ip | default(ansible_host) }}"
+    ansible_user: "{{ infisical_vm_ci_user.stdout }}"
+    env: "{{ env | default('dev') }}"
+  when: vm_name not in groups['routers'] | default([])

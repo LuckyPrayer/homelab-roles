@@ -1,0 +1,27 @@
+# Fail2ban Local Configuration
+# Managed by Ansible - Do not edit manually
+# Host: {{ inventory_hostname }}
+# Environment: {{ env | default('unknown') }}
+
+[DEFAULT]
+# IPs to never ban
+ignoreip = {{ fail2ban_ignoreip }}
+
+# Default ban settings
+bantime = {{ fail2ban_bantime }}
+findtime = {{ fail2ban_findtime }}
+maxretry = {{ fail2ban_maxretry }}
+
+# Ban action
+banaction = {{ fail2ban_banaction }}
+banaction_allports = iptables-allports
+
+# Logging
+logtarget = /var/log/fail2ban.log
+loglevel = INFO
+
+# Backend (auto-detect)
+backend = auto
+
+# Use systemd journal for services that log there
+usedns = warn

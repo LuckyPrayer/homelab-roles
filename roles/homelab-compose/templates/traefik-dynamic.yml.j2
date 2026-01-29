@@ -1,0 +1,30 @@
+http:
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+  routers:
+{% if harbor_enabled | default(false) %}
+    # Harbor UI and API router
+    harbor:
+      rule: "Host(`harbor.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}`) || Host(`harbor.{{ base_domain }}`)"
+      entryPoints:
+        - websecure
+      service: harbor
+      tls:
+        certResolver: mytls
+    # Harbor Registry API router (for docker pull/push)
+    harbor-registry:
+      rule: "Host(`registry.{{ hostvars[inventory_hostname].env }}.{{ base_domain }}`) || Host(`registry.{{ base_domain }}`)"
+      entryPoints:
+        - websecure
+      service: harbor
+      tls:
+        certResolver: mytls
+  services:
+    harbor:
+      loadBalancer:
+        servers:
+          - url: "http://nginx:8080"
+{% endif %}

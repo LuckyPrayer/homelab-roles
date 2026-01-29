@@ -1,0 +1,17 @@
+---
+# Handlers for GitHub Actions Runner
+
+- name: Restart github-runner
+  ansible.builtin.command:
+    cmd: ./svc.sh restart
+    chdir: "{{ github_runner_dir }}"
+
+- name: Stop github-runner
+  ansible.builtin.command:
+    cmd: ./svc.sh stop
+    chdir: "{{ github_runner_dir }}"
+
+- name: Start github-runner
+  ansible.builtin.command:
+    cmd: ./svc.sh start
+    chdir: "{{ github_runner_dir }}"

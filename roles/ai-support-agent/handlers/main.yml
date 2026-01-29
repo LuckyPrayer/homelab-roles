@@ -1,0 +1,13 @@
+---
+# Handlers for Oracle AI Support Agent role
+
+- name: Restart Oracle
+  community.docker.docker_compose_v2:
+    project_src: /opt/oracle
+    state: restarted
+
+# Legacy handler name for backward compatibility
+- name: Restart AI agent
+  community.docker.docker_compose_v2:
+    project_src: /opt/oracle
+    state: restarted

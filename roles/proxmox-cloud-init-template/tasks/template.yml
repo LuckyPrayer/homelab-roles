@@ -1,0 +1,172 @@
+---
+# Tasks for creating a single cloud-init template
+
+- name: Check if VM {{ template_item.vmid }} already exists
+  ansible.builtin.command: qm status {{ template_item.vmid }}
+  register: vm_exists_check
+  failed_when: false
+  changed_when: false
+
+- name: Debug VM existence check
+  ansible.builtin.debug:
+    msg: "VM {{ template_item.vmid }} ({{ template_item.name }}) exists: {{ vm_exists_check.rc == 0 }}"
+
+- name: Template creation tasks
+  when: vm_exists_check.rc != 0
+  block:
+    - name: Check if image is custom-built (file:// URL)
+      ansible.builtin.set_fact:
+        is_custom_build: "{{ template_item.image_url.startswith('file://') }}"
+
+    - name: Extract local file path for custom builds
+      ansible.builtin.set_fact:
+        custom_image_path: "{{ template_item.image_url | regex_replace('^file://', '') }}"
+      when: is_custom_build | bool
+
+    - name: Check if custom-built image exists
+      ansible.builtin.stat:
+        path: "{{ custom_image_path }}"
+      register: custom_image_stat
+      when: is_custom_build | bool
+
+    - name: Fail if custom-built image not found
+      ansible.builtin.fail:
+        msg: |
+          Custom-built image not found at {{ custom_image_path }}
+          
+          Please build the image first or ensure it exists at the expected location.
+      when: 
+        - is_custom_build | bool
+        - not custom_image_stat.stat.exists
+
+    - name: Copy custom-built image to template location
+      ansible.builtin.copy:
+        src: "{{ custom_image_path }}"
+        dest: "/tmp/{{ template_item.image_file }}"
+        remote_src: true
+        mode: '0644'
+      when: 
+        - is_custom_build | bool
+        - custom_image_stat.stat.exists
+      register: copy_result
+
+    - name: Check if cloud image already exists on remote host (for downloaded images)
+      ansible.builtin.stat:
+        path: "/tmp/{{ template_item.image_file }}"
+      register: image_file_stat
+      when: not (is_custom_build | bool)
+
+    - name: Download cloud image for {{ template_item.name }} on remote host
+      ansible.builtin.get_url:
+        url: "{{ template_item.image_url }}"
+        dest: "/tmp/{{ template_item.image_file }}"
+        mode: '0644'
+        timeout: 300
+      register: download_result
+      when: 
+        - not (is_custom_build | bool)
+        - not image_file_stat.stat.exists
+      check_mode: false
+
+    - name: Set download result for existing image
+      ansible.builtin.set_fact:
+        download_result:
+          changed: false
+          failed: false
+      when: 
+        - not (is_custom_build | bool)
+        - image_file_stat.stat.exists
+
+    - name: Set download result for custom build
+      ansible.builtin.set_fact:
+        download_result:
+          changed: "{{ copy_result.changed | default(false) }}"
+          failed: false
+      when: is_custom_build | bool
+
+    - name: Create VM {{ template_item.vmid }} for template
+      ansible.builtin.command: >
+        qm create {{ template_item.vmid }}
+        --name {{ template_item.name }}
+        --memory {{ template_item.memory | default(template_memory_mb) }}
+        --cores {{ template_item.cores | default(template_cpu_cores) }}
+        --net0 virtio,bridge={{ proxmox_bridge }}
+        --scsihw virtio-scsi-pci
+        --ostype {{ template_item.os_type | default('l26') }}
+        --machine {{ template_item.machine | default(template_machine_type) }}
+      when: download_result is succeeded
+      changed_when: true
+
+    - name: Import disk to VM
+      ansible.builtin.command: >
+        qm importdisk {{ template_item.vmid }}
+        /tmp/{{ template_item.image_file }}
+        {{ proxmox_storage }}
+      when: download_result is succeeded
+      changed_when: true
+
+    - name: Attach disk to VM as bootable
+      ansible.builtin.command: >
+        qm set {{ template_item.vmid }}
+        --scsi0 {{ proxmox_storage }}:vm-{{ template_item.vmid }}-disk-0,discard=on,ssd=1
+      changed_when: true
+
+    - name: Resize disk
+      ansible.builtin.command: >
+        qm resize {{ template_item.vmid }} scsi0 {{ template_item.disk_size | default(template_disk_size) }}
+      changed_when: true
+
+    - name: Add cloud-init drive
+      ansible.builtin.command: >
+        qm set {{ template_item.vmid }}
+        --ide2 {{ proxmox_snippet_storage }}:cloudinit
+      changed_when: true
+
+    - name: Set boot order to boot from disk
+      ansible.builtin.command: >
+        qm set {{ template_item.vmid }}
+        --boot c --bootdisk scsi0
+      changed_when: true
+
+    - name: Enable QEMU guest agent
+      ansible.builtin.command: >
+        qm set {{ template_item.vmid }}
+        --agent enabled=1
+      when: template_item.qemu_agent | default(template_qemu_agent) | bool
+      changed_when: true
+
+    - name: Set serial console
+      ansible.builtin.command: >
+        qm set {{ template_item.vmid }}
+        --serial0 socket --vga serial0
+      changed_when: true
+
+    - name: Configure cloud-init defaults with SSH key
+      ansible.builtin.command: >
+        qm set {{ template_item.vmid }}
+        --ipconfig0 ip=dhcp
+        --ciuser {{ template_ci_user }}
+        --nameserver {{ template_nameserver | default('1.1.1.1') }}
+        --sshkeys "{{ vm_ci_ssh_authorized_key | urlencode }}"
+      changed_when: true
+      when: 
+        - vm_ci_ssh_authorized_key is defined
+        - vm_ci_ssh_authorized_key != ''
+
+    - name: Configure cloud-init defaults without SSH key
+      ansible.builtin.command: >
+        qm set {{ template_item.vmid }}
+        --ipconfig0 ip=dhcp
+        --ciuser {{ template_ci_user }}
+        --nameserver {{ template_nameserver | default('1.1.1.1') }}
+      changed_when: true
+      when: vm_ci_ssh_authorized_key is not defined or vm_ci_ssh_authorized_key == ''
+
+    - name: Convert VM to template
+      ansible.builtin.command: >
+        qm template {{ template_item.vmid }}
+      changed_when: true
+
+- name: Display template creation status
+  ansible.builtin.debug:
+    msg: "Template {{ template_item.name }} (ID: {{ template_item.vmid }}) already exists or has been created successfully"

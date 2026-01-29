@@ -1,0 +1,26 @@
+# Komodo Periphery Agent Configuration
+# This file is managed by Ansible - do not edit directly
+
+# Port for periphery agent API
+port = 8120
+
+# Stats collection interval (seconds)
+stats_polling_rate = "5-sec"
+
+# Directory for repo clones (Komodo managed repos)
+repo_dir = "/etc/komodo/repos"
+
+# Directory for stack deployments
+stack_dir = "/etc/komodo/stacks"
+
+# Logging
+logging.level = "info"
+
+{% if github_token | default('') != '' %}
+# GitHub Git Provider for private repository access
+[[git_provider]]
+domain = "github.com"
+accounts = [
+	{ username = "LuckyPrayer", token = "{{ github_token }}" },
+]
+{% endif %}

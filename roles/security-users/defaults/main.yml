@@ -1,0 +1,64 @@
+---
+# Default variables for security-users role
+
+# Service accounts to create
+service_users:
+  - name: backup-svc
+    uid: 3001
+    system: true
+    home: /var/lib/backup-svc
+    shell: /bin/bash
+    groups: [docker]
+    comment: "Docker Backup Service Account"
+    
+  - name: docker-svc
+    uid: 3002
+    system: true
+    home: /var/lib/docker-svc
+    shell: /bin/bash
+    groups: [docker]
+    comment: "Docker Service Account"
+    
+  - name: harbor-svc
+    uid: 3003
+    system: true
+    home: /var/lib/harbor-svc
+    shell: /bin/bash
+    groups: [docker]
+    comment: "Harbor Service Account"
+    
+  - name: n8nuser
+    uid: 3004
+    system: false
+    home: /home/n8nuser
+    shell: /bin/bash
+    groups: [docker]
+    comment: "n8n Automation User"
+    ssh_key_infisical_path: "/users/n8n"
+
+# Ansible user configuration (non-root SSH user)
+create_ansible_user: true
+custom_ansible_user_name: ansible
+custom_ansible_user_uid: 2000
+custom_ansible_user_groups: [docker, sudo]
+custom_ansible_user_shell: /bin/bash
+custom_ansible_user_ssh_key: "{{ lookup('env', 'ANSIBLE_SSH_KEY') | default('', true) }}"
+
+# Human users to create from Infisical
+# These users are fetched from /users/{username}/ in Infisical
+# Expected secrets: SSH_PUBLIC_KEY, GROUPS (comma-separated), SHELL, SUDO_ACCESS, PASSWORD
+# Service users in service_users list are automatically excluded
+human_users:
+  - name: luckyprayer
+    uid: 1001
+    comment: "Primary Admin User"
+    infisical_path: "/users/luckyprayer"
+
+# SSH security settings
+disable_root_ssh: false  # Set to true after migrating to ansible user
+ssh_password_authentication: false
+ssh_permit_empty_password: false
+
+# Sudoers configuration
+configure_sudoers: true
+sudoers_dir: /etc/sudoers.d

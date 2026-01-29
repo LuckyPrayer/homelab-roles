@@ -1,0 +1,94 @@
+---
+# Tailscale Firewall Configuration Tasks
+# Configure iptables rules for Tailscale VPN
+
+- name: Check if iptables is available
+  ansible.builtin.command: which iptables
+  register: iptables_check
+  changed_when: false
+  failed_when: false
+
+- name: Configure Tailscale firewall rules
+  when: iptables_check.rc == 0
+  block:
+    - name: Allow Tailscale UDP traffic (WireGuard port 41641)
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: udp
+        destination_port: 41641
+        jump: ACCEPT
+        comment: "Tailscale WireGuard UDP"
+      notify: save iptables
+      failed_when: false
+
+    - name: Allow all traffic from Tailscale interface (tailscale0)
+      ansible.builtin.iptables:
+        chain: INPUT
+        in_interface: tailscale0
+        jump: ACCEPT
+        comment: "Allow all Tailscale traffic"
+      notify: save iptables
+      failed_when: false
+
+    - name: Allow forwarding from Tailscale to internal networks
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: tailscale0
+        jump: ACCEPT
+        comment: "Forward Tailscale to internal"
+      notify: save iptables
+      failed_when: false
+
+    - name: Allow forwarding from internal networks to Tailscale
+      ansible.builtin.iptables:
+        chain: FORWARD
+        out_interface: tailscale0
+        jump: ACCEPT
+        comment: "Forward internal to Tailscale"
+      notify: save iptables
+      failed_when: false
+
+    - name: Enable NAT for Tailscale subnet routing
+      ansible.builtin.iptables:
+        table: nat
+        chain: POSTROUTING
+        out_interface: "{{ item }}"
+        source: "100.64.0.0/10"
+        jump: MASQUERADE
+        comment: "NAT Tailscale traffic to {{ item }}"
+      loop: "{{ tailscale_nat_interfaces | default(['eth0']) }}"
+      notify: save iptables
+      failed_when: false
+      when: tailscale_advertise_routes | length > 0
+
+- name: Ensure ts-input chain has final RETURN rule
+  # Tailscale's ts-input chain is inserted at the top of INPUT chain
+  # Without a final RETURN, non-Tailscale traffic never reaches our firewall rules
+  # This ensures normal LAN traffic (SSH, ICMP, etc.) returns to INPUT chain
+  when: iptables_check.rc == 0
+  block:
+    - name: Check if ts-input chain exists
+      ansible.builtin.command: iptables -L ts-input -n
+      register: ts_input_check
+      changed_when: false
+      failed_when: false
+
+    - name: Check if ts-input already has final RETURN rule
+      ansible.builtin.shell: |
+        iptables -S ts-input | tail -1 | grep -q "^-A ts-input -j RETURN$"
+      register: ts_input_return_check
+      changed_when: false
+      failed_when: false
+      when: ts_input_check.rc == 0
+
+    - name: Add RETURN rule to end of ts-input chain
+      ansible.builtin.command: iptables -A ts-input -j RETURN
+      when:
+        - ts_input_check.rc == 0
+        - ts_input_return_check.rc != 0
+      notify: save iptables
+
+- name: Save iptables rules
+  ansible.builtin.command: netfilter-persistent save
+  changed_when: false
+  failed_when: false

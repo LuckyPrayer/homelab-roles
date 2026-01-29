@@ -1,0 +1,72 @@
+---
+# Default variables for cloud-init template provisioning
+
+# Storage location for the template
+proxmox_storage: "local-lvm"
+
+# Default bridge for network
+# Note: This bridge should be VLAN-aware in Proxmox to support VLAN tagging
+# VLANs are applied when cloning VMs from templates, not on the templates themselves
+proxmox_bridge: "vmbr0"
+
+# Default VM network settings
+vm_net_prefix: 24
+vm_net_gateway: "192.168.2.236"
+
+# Default snippet storage for cloud-init drive (must be a directory-type storage like 'local')
+proxmox_snippet_storage: "local-lvm"
+
+# Default CPU and memory for templates
+template_cpu_cores: 2
+template_memory_mb: 2048
+
+# Default machine type (q35 for modern machines, i440fx for legacy)
+template_machine_type: "q35"
+
+# Default disk size (will be resized on VM creation)
+template_disk_size: "32G"
+
+# QEMU guest agent
+template_qemu_agent: true
+
+# Cloud-init user (can be overridden during VM provisioning)
+template_ci_user: "root"
+
+# Default SSH keys (should be set in group_vars or playbook)
+template_ci_ssh_keys: ""
+
+# Cloud-init IP configuration
+# By default, templates are created with DHCP enabled (ip=dhcp)
+# This can be overridden when cloning VMs from the template
+template_ipconfig: "ip=dhcp"
+
+# Default nameserver for cloud-init templates
+template_nameserver: "1.1.1.1"
+
+# List of cloud-init templates to create
+# Each template should have:
+# - name: Template name in Proxmox
+# - vmid: Unique VM ID for the template
+# - image_url: URL to download the cloud image
+# - image_file: Filename to save the image as
+# - os_type: OS type (e.g., l26 for Linux 2.6+)
+# NOTE: Define cloud_init_templates in group_vars/all/main.yml
+# Example:
+#  - name: "ubuntu-22.04-template"
+#    vmid: 9000
+#    image_url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+#    image_file: "ubuntu-22.04-cloudimg.img"
+#    os_type: "l26"
+#    machine: "q35"  # Optional: override default machine type
+#    cores: 2
+#    memory: 2048
+#    disk_size: "32G"
+#  - name: "debian-12-template"
+#    vmid: 9001
+#    image_url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+#    image_file: "debian-12-cloudimg.qcow2"
+#    os_type: "l26"
+#    machine: "q35"  # Optional: override default machine type
+#    cores: 2
+#    memory: 2048
+#    disk_size: "32G"

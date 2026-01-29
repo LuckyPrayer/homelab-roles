@@ -1,0 +1,28 @@
+version: "3.9"
+
+# Glances - System Monitoring
+# Provides real-time system metrics via web API for Homepage widgets
+
+services:
+  glances:
+    image: nicolargo/glances:latest-full
+    container_name: glances
+    pid: host
+    environment:
+      - GLANCES_OPT=-w
+      - TZ={{ homepage_timezone | default('America/Toronto') }}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/os-release:/etc/os-release:ro
+    ports:
+      - "61208:61208"
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    name: homelab
+    external: true

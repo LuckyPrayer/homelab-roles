@@ -1,0 +1,226 @@
+---
+# Tailscale Configuration Tasks
+
+- name: Fetch Tailscale auth key from Infisical
+  when: 
+    - tailscale_infisical_enabled | bool
+    - infisical_service_token is defined
+    - infisical_service_token | length > 0
+  block:
+    - name: Ensure Infisical token file exists
+      ansible.builtin.stat:
+        path: /root/.infisical-token
+      register: infisical_token_file
+
+    - name: Get auth key from Infisical
+      ansible.builtin.shell: |
+        export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+        infisical secrets get {{ tailscale_infisical_key_name }} \
+          --projectId {{ infisical_project_id }} \
+          --env {{ infisical_env_slug }} \
+          --path {{ tailscale_infisical_path }} \
+          --plain 2>/dev/null || echo ""
+      register: tailscale_key_result
+      changed_when: false
+      no_log: true
+      when: infisical_token_file.stat.exists
+
+    - name: Set auth key from Infisical
+      ansible.builtin.set_fact:
+        tailscale_auth_key_actual: "{{ tailscale_key_result.stdout }}"
+      when: 
+        - tailscale_key_result is defined
+        - tailscale_key_result is not skipped
+        - tailscale_key_result.rc == 0
+        - tailscale_key_result.stdout | length > 0
+      no_log: true
+
+- name: Use provided auth key if Infisical fetch failed or not configured
+  ansible.builtin.set_fact:
+    tailscale_auth_key_actual: "{{ tailscale_auth_key }}"
+  when: tailscale_auth_key_actual is not defined or tailscale_auth_key_actual | length == 0
+  no_log: true
+
+- name: Fail if no auth key available
+  ansible.builtin.fail:
+    msg: |
+      No Tailscale auth key available!
+      Please either:
+      1. Set tailscale_auth_key in your inventory
+      2. Add TAILSCALE_AUTH_KEY to Infisical at {{ tailscale_infisical_path }}
+      3. Set TAILSCALE_AUTH_KEY environment variable
+      
+      Generate a reusable auth key at: https://login.tailscale.com/admin/settings/keys
+  when: 
+    - tailscale_auth_key_actual is not defined or tailscale_auth_key_actual | length == 0
+    - not (tailscale_force_reauth | default(false))
+
+- name: Check current Tailscale status
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_status_raw
+  changed_when: false
+  failed_when: false
+
+- name: Parse Tailscale status
+  ansible.builtin.set_fact:
+    tailscale_is_logged_in: "{{ (tailscale_status_raw.stdout | from_json).BackendState == 'Running' }}"
+    tailscale_current_hostname: "{{ (tailscale_status_raw.stdout | from_json).Self.HostName | default('') }}"
+  when: 
+    - tailscale_status_raw.rc == 0
+    - tailscale_status_raw.stdout | length > 0
+  failed_when: false
+
+- name: Set default status if not logged in
+  ansible.builtin.set_fact:
+    tailscale_is_logged_in: false
+    tailscale_current_hostname: ""
+  when: tailscale_is_logged_in is not defined
+
+- name: Display current Tailscale status
+  ansible.builtin.debug:
+    msg:
+      - "Tailscale logged in: {{ tailscale_is_logged_in }}"
+      - "Current hostname: {{ tailscale_current_hostname }}"
+      - "Desired hostname: {{ tailscale_hostname }}"
+
+- name: Configure Tailscale (authenticate and set options)
+  when: not tailscale_is_logged_in or tailscale_force_reauth
+  block:
+    - name: Build tailscale up command
+      ansible.builtin.set_fact:
+        tailscale_up_cmd: >-
+          tailscale up
+          --authkey={{ tailscale_auth_key_actual }}
+          --hostname={{ tailscale_hostname }}
+          --reset
+          {% if tailscale_advertise_routes | length > 0 %}
+          --advertise-routes={{ tailscale_advertise_routes | join(',') }}
+          {% endif %}
+          {% if tailscale_exit_node %}
+          --advertise-exit-node
+          {% endif %}
+          {% if tailscale_accept_routes %}
+          --accept-routes
+          {% endif %}
+          {% if not tailscale_accept_dns %}
+          --accept-dns=false
+          {% endif %}
+          {% if tailscale_ssh %}
+          --ssh
+          {% endif %}
+          {% for tag in tailscale_tags %}
+          --advertise-tags={{ tag }}
+          {% endfor %}
+          {{ tailscale_extra_args }}
+      no_log: true
+
+    - name: Authenticate and configure Tailscale (with ts-input fix)
+      # CRITICAL: Tailscale inserts ts-input jump at the top of INPUT chain
+      # Without a final RETURN rule, non-Tailscale traffic (SSH, ICMP) is dropped
+      # We bundle the fix with tailscale up to ensure connectivity is maintained
+      ansible.builtin.shell: |
+        # Run tailscale up in background
+        {{ tailscale_up_cmd }} &
+        TS_PID=$!
+        
+        # Wait for Tailscale to create ts-input chain (up to 10 seconds)
+        for i in $(seq 1 20); do
+          sleep 0.5
+          if iptables -L ts-input -n >/dev/null 2>&1; then
+            # ts-input exists, check if it has RETURN rule
+            if ! iptables -S ts-input | tail -1 | grep -q "^-A ts-input -j RETURN$"; then
+              iptables -A ts-input -j RETURN
+              echo "ts-input RETURN rule added"
+            fi
+            break
+          fi
+        done
+        
+        # Wait for tailscale up to complete
+        wait $TS_PID
+        exit $?
+      register: tailscale_up_result
+      no_log: true
+      async: 120
+      poll: 0
+
+    - name: Wait briefly for Tailscale to stabilize
+      ansible.builtin.pause:
+        seconds: 8
+
+    - name: Reset SSH connection after Tailscale network change
+      ansible.builtin.meta: reset_connection
+
+    - name: Wait for SSH to become available again
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Check async Tailscale authentication result
+      ansible.builtin.async_status:
+        jid: "{{ tailscale_up_result.ansible_job_id }}"
+      register: tailscale_up_async_result
+      until: tailscale_up_async_result.finished
+      retries: 30
+      delay: 4
+      no_log: true
+
+    - name: Display Tailscale up result
+      ansible.builtin.debug:
+        msg: "Tailscale authentication completed successfully"
+      when: tailscale_up_async_result.rc is defined and tailscale_up_async_result.rc == 0
+
+- name: Update Tailscale configuration if already logged in
+  when: 
+    - tailscale_is_logged_in
+    - not tailscale_force_reauth
+  block:
+    - name: Build tailscale set command for route updates
+      ansible.builtin.set_fact:
+        tailscale_set_cmd: >-
+          tailscale set
+          {% if tailscale_advertise_routes | length > 0 %}
+          --advertise-routes={{ tailscale_advertise_routes | join(',') }}
+          {% endif %}
+          {% if tailscale_exit_node %}
+          --advertise-exit-node
+          {% endif %}
+          {% if tailscale_accept_routes %}
+          --accept-routes
+          {% endif %}
+          {% if not tailscale_accept_dns %}
+          --accept-dns=false
+          {% endif %}
+          {% if tailscale_ssh %}
+          --ssh
+          {% endif %}
+
+    - name: Update Tailscale settings
+      ansible.builtin.command: "{{ tailscale_set_cmd }}"
+      register: tailscale_set_result
+      changed_when: false
+      failed_when: false
+
+- name: Get Tailscale IP addresses
+  ansible.builtin.command: tailscale ip
+  register: tailscale_ips
+  changed_when: false
+
+- name: Get Tailscale status for display
+  ansible.builtin.command: tailscale status
+  register: tailscale_final_status
+  changed_when: false
+
+- name: Display Tailscale configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "═══════════════════════════════════════════════════════════════"
+      - "Tailscale configured on {{ inventory_hostname }}"
+      - "═══════════════════════════════════════════════════════════════"
+      - "Tailscale IPs: {{ tailscale_ips.stdout_lines | join(', ') }}"
+      - "Hostname: {{ tailscale_hostname }}"
+      - "Advertised routes: {{ tailscale_advertise_routes | join(', ') | default('None') }}"
+      - "Exit node: {{ tailscale_exit_node }}"
+      - "Accept routes: {{ tailscale_accept_routes }}"
+      - "SSH enabled: {{ tailscale_ssh }}"
+      - "═══════════════════════════════════════════════════════════════"

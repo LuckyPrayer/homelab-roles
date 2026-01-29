@@ -1,0 +1,78 @@
+---
+# Infisical secrets tasks for Oracle AI Support Agent
+
+- name: Fetch Discord bot token from Infisical
+  ansible.builtin.command:
+    cmd: >
+      infisical secrets get DISCORD_BOT_TOKEN
+      --env={{ infisical_env_slug }}
+      --path={{ oracle_infisical_path | default('/infrastructure/monitoring/oracle/') }}
+      --plain
+  environment:
+    INFISICAL_TOKEN: "{{ infisical_service_token }}"
+  register: discord_token_result
+  changed_when: false
+  no_log: true
+
+- name: Set Discord token fact
+  ansible.builtin.set_fact:
+    oracle_discord_token: "{{ discord_token_result.stdout }}"
+  no_log: true
+
+- name: Fetch Anthropic API key from Infisical
+  ansible.builtin.command:
+    cmd: >
+      infisical secrets get ANTHROPIC_API_KEY
+      --env={{ infisical_env_slug }}
+      --path={{ oracle_infisical_path | default('/infrastructure/monitoring/oracle/') }}
+      --plain
+  environment:
+    INFISICAL_TOKEN: "{{ infisical_service_token }}"
+  register: anthropic_key_result
+  changed_when: false
+  no_log: true
+
+- name: Set Anthropic API key fact
+  ansible.builtin.set_fact:
+    oracle_anthropic_api_key: "{{ anthropic_key_result.stdout }}"
+  no_log: true
+
+- name: Fetch Oracle SSH private key from Infisical
+  ansible.builtin.command:
+    cmd: >
+      infisical secrets get ORACLE_SSH_PRIVATE_KEY
+      --env={{ infisical_env_slug }}
+      --path={{ oracle_infisical_path | default('/infrastructure/monitoring/oracle/') }}
+      --plain
+  environment:
+    INFISICAL_TOKEN: "{{ infisical_service_token }}"
+  register: ssh_key_result
+  changed_when: false
+  no_log: true
+  ignore_errors: true
+
+- name: Set Oracle SSH private key fact
+  ansible.builtin.set_fact:
+    oracle_ssh_private_key: "{{ ssh_key_result.stdout | default('') }}"
+  no_log: true
+  when: ssh_key_result.rc == 0
+
+- name: Fetch Oracle SSH public key from Infisical
+  ansible.builtin.command:
+    cmd: >
+      infisical secrets get ORACLE_SSH_PUBLIC_KEY
+      --env={{ infisical_env_slug }}
+      --path={{ oracle_infisical_path | default('/infrastructure/monitoring/oracle/') }}
+      --plain
+  environment:
+    INFISICAL_TOKEN: "{{ infisical_service_token }}"
+  register: ssh_pubkey_result
+  changed_when: false
+  no_log: true
+  ignore_errors: true
+
+- name: Set Oracle SSH public key fact
+  ansible.builtin.set_fact:
+    oracle_ssh_public_key: "{{ ssh_pubkey_result.stdout | default('') }}"
+  no_log: true
+  when: ssh_pubkey_result.rc == 0

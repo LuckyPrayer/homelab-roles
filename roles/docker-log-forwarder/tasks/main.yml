@@ -1,0 +1,62 @@
+---
+# Docker Log Forwarder Role
+# Deploys a service that forwards Docker container logs to the Discord bot
+# for host-based channel routing
+
+- name: Create scripts directory
+  ansible.builtin.file:
+    path: /opt/scripts
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Copy log forwarder script
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../discord-bot/files/scripts/docker-log-forwarder.sh"
+    dest: /opt/scripts/docker-log-forwarder.sh
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart docker-log-forwarder
+
+- name: Copy discord-log helper script
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../discord-bot/files/scripts/discord-log.sh"
+    dest: /usr/local/bin/discord-log.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create symlink for discord-log
+  ansible.builtin.file:
+    src: /usr/local/bin/discord-log.sh
+    dest: /usr/local/bin/discord-log
+    state: link
+
+- name: Template log forwarder environment file
+  ansible.builtin.template:
+    src: docker-log-forwarder.env.j2
+    dest: /etc/default/docker-log-forwarder
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Restart docker-log-forwarder
+
+- name: Copy systemd service file
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../discord-bot/files/scripts/docker-log-forwarder.service"
+    dest: /etc/systemd/system/docker-log-forwarder.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart docker-log-forwarder
+
+- name: Enable and start docker-log-forwarder service
+  ansible.builtin.systemd:
+    name: docker-log-forwarder
+    enabled: "{{ docker_log_forwarder_enabled | default(true) }}"
+    state: "{{ 'started' if docker_log_forwarder_enabled | default(true) else 'stopped' }}"
+    daemon_reload: yes

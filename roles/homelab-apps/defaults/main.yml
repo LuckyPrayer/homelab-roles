@@ -1,0 +1,14 @@
+---
+# Defaults for homelab-apps role
+
+# Git repository settings
+homelab_apps_repo: "https://github.com/LuckyPrayer/homelab-apps.git"
+homelab_apps_branch: "main"
+homelab_apps_path: "/opt/homelab-apps"
+
+# Whether to run restore during deployment
+homelab_apps_restore: true
+
+# Docker user/group for file ownership
+docker_user: "root"
+docker_group: "docker"

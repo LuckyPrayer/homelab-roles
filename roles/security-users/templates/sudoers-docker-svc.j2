@@ -1,0 +1,16 @@
+# Sudoers configuration for docker-svc user
+# Provides minimum required privileges for Docker service operations
+
+Defaults:docker-svc !requiretty
+
+# Docker operations
+docker-svc ALL=(root) NOPASSWD: /usr/bin/docker compose *
+docker-svc ALL=(root) NOPASSWD: /usr/bin/docker-compose *
+docker-svc ALL=(root) NOPASSWD: /usr/bin/docker ps *
+docker-svc ALL=(root) NOPASSWD: /usr/bin/docker images *
+docker-svc ALL=(root) NOPASSWD: /usr/bin/docker logs *
+docker-svc ALL=(root) NOPASSWD: /usr/bin/docker inspect *
+
+# Service management for docker-related services
+docker-svc ALL=(root) NOPASSWD: /usr/bin/systemctl status homelab-compose*
+docker-svc ALL=(root) NOPASSWD: /usr/bin/systemctl restart homelab-compose*

@@ -1,0 +1,44 @@
+---
+# Argus Stack Tasks
+# Deploys stacks for argus-dev and argus-prod hosts (monitoring)
+# Note: Prometheus/Grafana/Loki are deployed by a separate monitoring role
+# This handles Glances for Homepage widgets
+
+# =============================================================================
+# GLANCES STACK (System Monitoring for Homepage widgets)
+# =============================================================================
+- name: Create glances stack directory
+  ansible.builtin.file:
+    path: "{{ stacks_base_dir }}/glances"
+    state: directory
+    owner: docker-svc
+    group: docker
+    mode: '0750'
+  when: glances_enabled | default(true)
+
+- name: Template glances docker-compose
+  ansible.builtin.template:
+    src: stacks/glances/docker-compose.yml.j2
+    dest: "{{ stacks_base_dir }}/glances/docker-compose.yml"
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+  when: glances_enabled | default(true)
+
+# =============================================================================
+# START STACKS
+# =============================================================================
+- name: Build list of argus stacks
+  ansible.builtin.set_fact:
+    argus_stacks:
+      - glances
+
+- name: Start all stacks
+  ansible.builtin.shell: |
+    cd {{ stacks_base_dir }}/{{ item }}
+    docker compose up -d
+  loop: "{{ argus_stacks }}"
+  become: true
+  become_user: docker-svc
+  register: stack_start
+  changed_when: "'Started' in stack_start.stdout or 'Created' in stack_start.stdout"

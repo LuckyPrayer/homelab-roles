@@ -1,0 +1,43 @@
+version: "3.9"
+
+# Komodo Periphery Agent - Standalone
+# Deploys only the Periphery agent for monitoring this host's containers
+# The agent reports back to a central Komodo Core server
+
+services:
+  # ============================================================================
+  # PERIPHERY AGENT - Reports to Komodo Core
+  # ============================================================================
+  komodo-periphery:
+    image: ghcr.io/mbecker20/periphery:{{ komodo_version }}
+    container_name: komodo-periphery
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/proc:ro
+      # Mount stacks directory for Komodo to see Ansible-deployed containers
+      - {{ stacks_base_dir | default('/opt/stacks') }}:{{ stacks_base_dir | default('/opt/stacks') }}:ro
+      # Mount monitoring directory (separate from stacks)
+      - /opt/monitoring:/opt/monitoring:ro
+    environment:
+      PERIPHERY_PASSKEY: "${KOMODO_PASSKEY}"
+    ports:
+      - "{{ komodo_periphery_port }}:8120"
+    logging:
+      driver: {{ komodo_logging_driver }}
+      options:
+        max-size: "{{ komodo_logging_max_size }}"
+        max-file: "{{ komodo_logging_max_file }}"
+{% if komodo_periphery_memory_limit is defined %}
+    deploy:
+      resources:
+        limits:
+          memory: {{ komodo_periphery_memory_limit }}
+{% endif %}
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    name: homelab
+    external: true

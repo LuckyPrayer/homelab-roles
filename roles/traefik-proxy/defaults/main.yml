@@ -1,0 +1,71 @@
+---
+# Traefik Proxy Role Defaults
+# This role deploys Traefik as a reverse proxy on router VMs (e.g., hermes-dev)
+# to proxy traffic from management VLAN to services on other VLANs
+
+# Traefik version
+traefik_proxy_image: "traefik:2.11"
+
+# Installation directory
+traefik_proxy_base_dir: "/opt/traefik-proxy"
+
+# Traefik configuration
+traefik_proxy_email: "admin@{{ base_domain }}"
+traefik_proxy_log_level: "INFO"  # DEBUG, INFO, WARN, ERROR
+
+# Certificate resolver
+traefik_proxy_cert_resolver: "mytls"
+traefik_proxy_use_dns_challenge: true
+traefik_proxy_dns_provider: "cloudflare"  # cloudflare, route53, etc.
+
+# Cloudflare settings (if using Cloudflare DNS challenge)
+# Token will be fetched from Infisical or environment variable
+traefik_proxy_cf_api_token: ""
+
+# Infisical configuration for fetching secrets
+traefik_proxy_infisical_token: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+traefik_proxy_infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+traefik_proxy_infisical_env: "{{ env | default('dev') }}"
+traefik_proxy_infisical_path: "/infrastructure/dns/cloudflare"
+traefik_proxy_cf_secret_name: "CLOUDFLARE_API_TOKEN"
+
+# Entrypoints
+traefik_proxy_http_port: 80
+traefik_proxy_https_port: 443
+
+# Dashboard
+traefik_proxy_enable_dashboard: true
+traefik_proxy_dashboard_host: "traefik.{{ env }}.{{ base_domain }}"
+
+# Backend services to proxy
+# Define these in your inventory host_vars or group_vars
+# Example:
+# traefik_proxy_backends:
+#   - name: "n8n"
+#     host: "n8n.{{ env }}.{{ base_domain }}"
+#     backend_url: "http://192.168.20.100:5678"
+#     description: "n8n automation service"
+#   - name: "mealie"
+#     host: "mealie.{{ env }}.{{ base_domain }}"
+#     backend_url: "http://192.168.20.100:9000"
+#     description: "Mealie recipe manager"
+
+traefik_proxy_backends: []
+
+# Docker network
+traefik_proxy_network_name: "traefik-proxy"
+
+# Environment file for secrets
+traefik_proxy_env_file: "{{ traefik_proxy_base_dir }}/.env"
+# Certificate backup configuration
+# Enable backup/restore of Let's Encrypt certificates to avoid rate limits
+traefik_proxy_cert_backup_enabled: true
+
+# B2 backup credentials (fetched from Infisical)
+traefik_proxy_b2_account_id: ""
+traefik_proxy_b2_account_key: ""
+traefik_proxy_b2_bucket: "homelab-backups"
+traefik_proxy_restic_password: ""
+
+# Infisical paths for backup secrets
+traefik_proxy_backup_infisical_path: "/infrastructure/backup"

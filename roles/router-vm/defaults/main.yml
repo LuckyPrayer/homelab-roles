@@ -1,0 +1,120 @@
+---
+# Router VM Role Defaults
+# This role configures a Debian 13 VM as a router/gateway
+
+# VM configuration (inherits from proxmox-vm role)
+vm_name: "{{ inventory_hostname }}"
+vm_ip: null  # e.g., 192.168.2.10
+
+# Template to clone from
+vm_template_name: "debian-13-generic-dev"  # Override in group_vars per environment
+
+# VM resource configuration for router
+vm_cpu_cores: 2
+vm_memory_mb: 2048
+vm_disk_gb: 20
+vm_override_disk: true
+
+# Network configuration
+# Routers typically need multiple network interfaces
+# Primary interface - Management/WAN
+vm_bridge: vmbr0
+vm_vlan: null  # Management VLAN (e.g., VLAN 2 for management)
+vm_net_prefix: 24
+vm_net_gateway: 192.168.2.1
+
+# Additional network interfaces for routing between VLANs
+# These will be added via router-specific configuration
+router_interfaces: []
+  # Example:
+  # - name: net1
+  #   bridge: vmbr0
+  #   vlan: 10
+  #   ip: 192.168.10.1
+  #   netmask: 24
+  # - name: net2
+  #   bridge: vmbr0
+  #   vlan: 20
+  #   ip: 192.168.20.1
+  #   netmask: 24
+
+# Cloud-init configuration
+vm_ci_user: ansible
+vm_ci_ssh_authorized_key: ""
+
+# Proxmox configuration
+proxmox_node: proxmoxve
+proxmox_storage: local-lvm
+
+# Router-specific configuration
+router_enable_ip_forwarding: true
+router_enable_nat: false  # Set to true if this router should NAT traffic
+router_nat_interface: eth0  # Interface to NAT to (typically WAN)
+
+# Firewall configuration
+router_enable_firewall: true
+router_firewall_default_policy: DROP
+
+# Allowed services on router
+router_allowed_services:
+  - ssh
+  - dhcp  # If router provides DHCP
+
+# DHCP server configuration (optional)
+router_enable_dhcp: false
+router_dhcp_interfaces: []
+  # Example:
+  # - interface: eth1
+  #   range_start: 192.168.10.100
+  #   range_end: 192.168.10.200
+  #   subnet: 192.168.10.0
+  #   netmask: 255.255.255.0
+  #   gateway: 192.168.10.1
+  #   dns_servers:
+  #     - 8.8.8.8
+  #     - 1.1.1.1
+
+# DNS forwarder configuration (optional)
+router_enable_dns_forwarding: false
+router_dns_upstream:
+  - 8.8.8.8
+  - 1.1.1.1
+router_dns_listen_interfaces: []
+  # Example: ['eth1', 'eth2']
+
+# Routing configuration
+router_static_routes: []
+  # Example:
+  # - network: 10.0.0.0/8
+  #   gateway: 192.168.2.1
+  #   interface: eth0
+
+# VLANs to route between
+router_vlans: []
+  # Example:
+  # - id: 10
+  #   name: production
+  #   subnet: 192.168.10.0/24
+  #   gateway: 192.168.10.1
+  # - id: 20
+  #   name: development
+  #   subnet: 192.168.20.0/24
+  #   gateway: 192.168.20.1
+
+# VLAN isolation rules (FORWARD chain)
+# Block traffic between specific VLANs for security
+router_vlan_isolation_rules: []
+  # Example:
+  # - name: "Block DEV to PROD"
+  #   source: "192.168.20.0/24"
+  #   destination: "192.168.10.0/24"
+  #   action: "REJECT"
+  #   log: true
+  # - name: "Block PROD to DEV"
+  #   source: "192.168.10.0/24"
+  #   destination: "192.168.20.0/24"
+  #   action: "REJECT"
+  #   log: true
+# Glances system monitoring (for Homepage widgets)
+router_enable_glances: true
+router_glances_allowed_networks: "192.168.0.0/16"  # Default: all private networks

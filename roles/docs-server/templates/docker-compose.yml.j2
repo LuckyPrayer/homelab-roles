@@ -1,0 +1,43 @@
+services:
+  docs:
+    image: {{ docs_server_image_name }}:{{ docs_server_image_tag }}
+    container_name: {{ docs_server_container_name }}
+{% if not docs_traefik_enabled %}
+    ports:
+      - "{{ docs_server_port }}:80"
+{% endif %}
+    restart: unless-stopped
+{% if docs_traefik_enabled %}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.docs-{{ env }}.rule=Host(`{{ docs_traefik_subdomain }}.{{ env }}.{{ base_domain }}`)"
+      - "traefik.http.routers.docs-{{ env }}.entrypoints=websecure"
+      - "traefik.http.routers.docs-{{ env }}.tls.certresolver={{ docs_traefik_certresolver }}"
+      - "traefik.http.services.docs-{{ env }}.loadbalancer.server.port=80"
+{% if env == 'prod' %}
+      # Vanity domain router for production (used by hermes-prod proxy)
+      - "traefik.http.routers.docs-vanity.rule=Host(`{{ docs_traefik_subdomain }}.{{ base_domain }}`)"
+      - "traefik.http.routers.docs-vanity.entrypoints=websecure"
+      - "traefik.http.routers.docs-vanity.tls.certresolver={{ docs_traefik_certresolver }}"
+      - "traefik.http.routers.docs-vanity.service=docs-{{ env }}"
+{% endif %}
+    networks:
+      - default
+{% endif %}
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: {{ docs_healthcheck_interval }}
+      timeout: {{ docs_healthcheck_timeout }}
+      retries: {{ docs_healthcheck_retries }}
+      start_period: {{ docs_healthcheck_start_period }}
+
+{% if docs_traefik_enabled %}
+networks:
+  default:
+    name: homelab
+    external: true
+{% else %}
+networks:
+  default:
+    name: homelab-docs-network
+{% endif %}

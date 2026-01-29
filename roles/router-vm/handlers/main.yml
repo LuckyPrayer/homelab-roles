@@ -1,0 +1,42 @@
+---
+# Handlers for router-vm role
+
+- name: restart networking
+  ansible.builtin.systemd:
+    name: networking
+    state: restarted
+
+- name: restart networkd
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    state: restarted
+
+- name: save iptables
+  ansible.builtin.command:
+    cmd: netfilter-persistent save
+  changed_when: false
+
+- name: apply static routes
+  ansible.builtin.shell: |
+    bash /etc/network/routes
+  changed_when: false
+
+- name: restart dhcp
+  ansible.builtin.systemd:
+    name: isc-dhcp-server
+    state: restarted
+
+- name: restart dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: restarted
+
+- name: restart pihole
+  community.docker.docker_compose_v2:
+    project_src: /opt/pihole
+    state: restarted
+- name: restart glances
+  ansible.builtin.shell: |
+    cd /opt/stacks/glances
+    docker compose down && docker compose up -d
+  changed_when: true

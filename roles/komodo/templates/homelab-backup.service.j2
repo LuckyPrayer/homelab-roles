@@ -1,0 +1,25 @@
+[Unit]
+Description=Daily backup of Docker containers to Backblaze B2
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/scripts/komodo-backup.sh all full
+User=root
+Group=root
+
+# Environment
+EnvironmentFile=-/opt/scripts/backup.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=homelab-backup
+
+# Security
+PrivateTmp=true
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

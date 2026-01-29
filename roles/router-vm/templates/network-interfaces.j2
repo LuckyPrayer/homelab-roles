@@ -1,0 +1,13 @@
+# Network interface configuration for {{ item.name }}
+# Managed by Ansible - do not edit manually
+
+auto {{ item.name }}
+iface {{ item.name }} inet static
+    address {{ item.ip }}
+    netmask {{ item.netmask }}
+{% if item.vlan is defined and item.vlan %}
+    vlan-raw-device {{ item.bridge | default('eth0') }}
+{% endif %}
+{% if item.mtu is defined %}
+    mtu {{ item.mtu }}
+{% endif %}

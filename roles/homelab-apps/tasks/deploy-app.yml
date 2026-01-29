@@ -1,0 +1,121 @@
+---
+# Deploy a single application from homelab-apps repository
+# Called in a loop from main.yml with app_name variable
+
+- name: "{{ app_name }} - Read app config"
+  ansible.builtin.slurp:
+    src: "{{ homelab_apps_path }}/{{ app_name }}/config.yml"
+  register: app_config_raw
+  failed_when: false
+
+- name: "{{ app_name }} - Parse app config"
+  ansible.builtin.set_fact:
+    app_config: "{{ app_config_raw.content | b64decode | from_yaml if app_config_raw.content is defined else {} }}"
+
+- name: "{{ app_name }} - Check if /opt/stacks/{{ app_name }} exists"
+  ansible.builtin.stat:
+    path: "/opt/stacks/{{ app_name }}"
+  register: stacks_path_stat
+
+- name: "{{ app_name }} - Handle existing directory (migrate data)"
+  when:
+    - stacks_path_stat.stat.exists | default(false)
+    - stacks_path_stat.stat.isdir | default(false)
+    - not (stacks_path_stat.stat.islnk | default(false))
+  block:
+    - name: "{{ app_name }} - Copy existing data to homelab-apps location"
+      ansible.builtin.shell: |
+        if [ -d "/opt/stacks/{{ app_name }}/data" ]; then
+          mkdir -p "{{ homelab_apps_path }}/{{ app_name }}/data"
+          cp -an "/opt/stacks/{{ app_name }}/data/"* "{{ homelab_apps_path }}/{{ app_name }}/data/" 2>/dev/null || true
+        fi
+      changed_when: false
+      
+    - name: "{{ app_name }} - Remove existing directory to allow symlink"
+      ansible.builtin.file:
+        path: "/opt/stacks/{{ app_name }}"
+        state: absent
+
+- name: "{{ app_name }} - Create symlink in /opt/stacks"
+  ansible.builtin.file:
+    src: "{{ homelab_apps_path }}/{{ app_name }}"
+    dest: "/opt/stacks/{{ app_name }}"
+    state: link
+    force: true
+
+- name: "{{ app_name }} - Ensure data directory exists"
+  ansible.builtin.file:
+    path: "{{ homelab_apps_path }}/{{ app_name }}/data"
+    state: directory
+    mode: '0755'
+    owner: "{{ docker_user | default('root') }}"
+    group: "{{ docker_group | default('docker') }}"
+
+- name: "{{ app_name }} - Build Infisical secret paths"
+  ansible.builtin.set_fact:
+    app_infisical_path: "{{ app_config.secrets.infisical_path | default('') }}"
+  when: app_config.secrets is defined
+
+- name: "{{ app_name }} - Create .env file with environment variables"
+  ansible.builtin.template:
+    src: app-env.j2
+    dest: "{{ homelab_apps_path }}/{{ app_name }}/.env"
+    mode: '0600'
+  vars:
+    app_env: "{{ host_config.env | default('dev') }}"
+    base_domain: "{{ manifest.settings.defaults.BASE_DOMAIN | default('thebozic.com') }}"
+    timezone: "{{ manifest.settings.defaults.TZ | default('America/Toronto') }}"
+
+- name: "{{ app_name }} - Deploy with infisical-run (if secrets required)"
+  ansible.builtin.shell: |
+    cd {{ homelab_apps_path }}/{{ app_name }}
+    infisical run --path="{{ app_infisical_path }}" --env="{{ host_config.env | default('dev') }}" -- \
+      docker compose up -d --remove-orphans
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+    ENV: "{{ host_config.env | default('dev') }}"
+    BASE_DOMAIN: "{{ manifest.settings.defaults.BASE_DOMAIN | default('thebozic.com') }}"
+    TZ: "{{ manifest.settings.defaults.TZ | default('America/Toronto') }}"
+  when:
+    - app_config.secrets is defined
+    - app_config.secrets.infisical_path is defined
+    - app_config.secrets.infisical_path is not none
+    - app_config.secrets.infisical_path | string | length > 0
+  register: deploy_with_secrets
+  changed_when: "'Created' in deploy_with_secrets.stdout or 'Started' in deploy_with_secrets.stdout"
+
+- name: "{{ app_name }} - Deploy without secrets"
+  ansible.builtin.shell: |
+    cd {{ homelab_apps_path }}/{{ app_name }}
+    docker compose up -d --remove-orphans
+  environment:
+    ENV: "{{ host_config.env | default('dev') }}"
+    BASE_DOMAIN: "{{ manifest.settings.defaults.BASE_DOMAIN | default('thebozic.com') }}"
+    TZ: "{{ manifest.settings.defaults.TZ | default('America/Toronto') }}"
+  when: >
+    app_config.secrets is not defined or
+    app_config.secrets.infisical_path is not defined or
+    app_config.secrets.infisical_path is none or
+    app_config.secrets.infisical_path | string | length == 0
+  register: deploy_without_secrets
+  changed_when: "'Created' in deploy_without_secrets.stdout or 'Started' in deploy_without_secrets.stdout"
+
+- name: "{{ app_name }} - Wait for container to be healthy"
+  ansible.builtin.shell: |
+    for i in {1..30}; do
+      if docker ps --filter "name={{ app_name }}" --filter "status=running" | grep -q {{ app_name }}; then
+        echo "Container {{ app_name }} is running"
+        exit 0
+      fi
+      sleep 2
+    done
+    echo "Timeout waiting for {{ app_name }}"
+    exit 1
+  register: health_check
+  changed_when: false
+  failed_when: health_check.rc != 0
+
+- name: "{{ app_name }} - Deployment complete"
+  ansible.builtin.debug:
+    msg: "✓ {{ app_name }} deployed successfully"

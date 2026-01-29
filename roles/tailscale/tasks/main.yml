@@ -1,0 +1,21 @@
+---
+# Tailscale Role Main Tasks
+# This role installs and configures Tailscale VPN for secure remote access
+
+- name: Skip Tailscale if not enabled
+  ansible.builtin.debug:
+    msg: "Tailscale is not enabled for {{ inventory_hostname }}. Set tailscale_enabled: true to enable."
+  when: not (tailscale_enabled | default(false) | bool)
+
+- name: Install and configure Tailscale
+  when: tailscale_enabled | default(false) | bool
+  block:
+    - name: Include Tailscale installation tasks
+      ansible.builtin.include_tasks: install.yml
+
+    - name: Include Tailscale configuration tasks
+      ansible.builtin.include_tasks: configure.yml
+
+    - name: Configure firewall for Tailscale
+      ansible.builtin.include_tasks: firewall.yml
+      when: tailscale_configure_firewall | default(true) | bool
