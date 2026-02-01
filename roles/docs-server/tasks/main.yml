@@ -28,7 +28,7 @@
 
 - name: Copy documentation files
   ansible.builtin.copy:
-    src: "{{ role_path }}/../../../docs/"
+    src: "{{ docs_source_dir }}/docs/"
     dest: "{{ docs_server_base_dir }}/docs/"
     mode: '0644'
     owner: "{{ vm_ci_user | default('root') }}"
@@ -37,7 +37,7 @@
 
 - name: Copy main README as index
   ansible.builtin.copy:
-    src: "{{ role_path }}/../../../README.md"
+    src: "{{ docs_source_dir }}/README.md"
     dest: "{{ docs_server_base_dir }}/docs/index.md"
     mode: '0644'
     owner: "{{ vm_ci_user | default('root') }}"

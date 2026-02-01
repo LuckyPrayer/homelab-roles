@@ -774,7 +774,7 @@
 
     - name: Deploy Komodo backup script (Core)
       ansible.builtin.copy:
-        src: "{{ role_path }}/../../../scripts/komodo-backup.sh"
+        src: "{{ playbook_dir }}/../../scripts/komodo-backup.sh"
         dest: /opt/scripts/komodo-backup.sh
         owner: root
         group: root
@@ -782,7 +782,7 @@
 
     - name: Deploy Komodo restore script (Core)
       ansible.builtin.copy:
-        src: "{{ role_path }}/../../../scripts/komodo-restore.sh"
+        src: "{{ playbook_dir }}/../../scripts/komodo-restore.sh"
         dest: /opt/scripts/komodo-restore.sh
         owner: root
         group: root
@@ -1038,7 +1038,7 @@
 
     - name: Deploy Komodo backup script
       ansible.builtin.copy:
-        src: "{{ role_path }}/../../../scripts/komodo-backup.sh"
+        src: "{{ playbook_dir }}/../../scripts/komodo-backup.sh"
         dest: /opt/scripts/komodo-backup.sh
         owner: root
         group: root
@@ -1046,7 +1046,7 @@
 
     - name: Deploy Komodo restore script
       ansible.builtin.copy:
-        src: "{{ role_path }}/../../../scripts/komodo-restore.sh"
+        src: "{{ playbook_dir }}/../../scripts/komodo-restore.sh"
         dest: /opt/scripts/komodo-restore.sh
         owner: root
         group: root

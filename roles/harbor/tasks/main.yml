@@ -10,7 +10,7 @@
   when: not (harbor_enabled | default(false))
 
 # ============================================================================
-# Step 1: Fetch secrets from Infisical
+# Step 1: Fetch secrets from Infisical (delegated to localhost)
 # ============================================================================
 
 - name: Fetch Harbor admin password from Infisical
@@ -19,11 +19,14 @@
       --path={{ harbor_infisical_path }} \
       --env={{ infisical_env_slug }} \
       --projectId={{ infisical_project_id }} \
-      --token={{ infisical_service_token }} \
-      --plain
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
   register: harbor_admin_password_result
   changed_when: false
   no_log: true
+  delegate_to: localhost
+  become: false
 
 - name: Fetch Harbor database password from Infisical
   shell: |
@@ -31,11 +34,14 @@
       --path={{ harbor_infisical_path }} \
       --env={{ infisical_env_slug }} \
       --projectId={{ infisical_project_id }} \
-      --token={{ infisical_service_token }} \
-      --plain
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
   register: harbor_db_password_result
   changed_when: false
   no_log: true
+  delegate_to: localhost
+  become: false
 
 - name: Set Harbor secret facts
   set_fact:
@@ -315,15 +321,17 @@
     # Check if secret exists
     ROBOT_NAME='{{ harbor_robot_name }}'
     ROBOT_SECRET='{{ harbor_robot_secret }}'
-    if infisical secrets get HARBOR_ROBOT_NAME --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }} --token={{ infisical_service_token }} --plain 2>/dev/null; then
+    if infisical secrets get HARBOR_ROBOT_NAME --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }} --plain 2>/dev/null; then
       # Update existing secrets
-      infisical secrets set "HARBOR_ROBOT_NAME=${ROBOT_NAME}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }} --token={{ infisical_service_token }}
-      infisical secrets set "HARBOR_ROBOT_SECRET=${ROBOT_SECRET}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }} --token={{ infisical_service_token }}
+      infisical secrets set "HARBOR_ROBOT_NAME=${ROBOT_NAME}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
+      infisical secrets set "HARBOR_ROBOT_SECRET=${ROBOT_SECRET}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
     else
       # Create new secrets
-      infisical secrets set "HARBOR_ROBOT_NAME=${ROBOT_NAME}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }} --token={{ infisical_service_token }}
-      infisical secrets set "HARBOR_ROBOT_SECRET=${ROBOT_SECRET}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }} --token={{ infisical_service_token }}
+      infisical secrets set "HARBOR_ROBOT_NAME=${ROBOT_NAME}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
+      infisical secrets set "HARBOR_ROBOT_SECRET=${ROBOT_SECRET}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
     fi
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
   delegate_to: localhost
   become: false
   changed_when: true

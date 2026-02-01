@@ -110,6 +110,40 @@
   become: false
   run_once: true
 
+# Check if VM with this name already exists to avoid creating duplicates
+- name: Check if VM '{{ vm_name }}' already exists
+  ansible.builtin.shell: |
+    {{ venv_path }}/bin/python3 << 'EOF'
+    from proxmoxer import ProxmoxAPI
+    proxmox = ProxmoxAPI(
+        "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}",
+        user="ansible@pve",
+        token_name="{{ proxmox_token_id.stdout }}",
+        token_value="{{ proxmox_token_secret.stdout }}",
+        verify_ssl=False
+    )
+    for vm in proxmox.cluster.resources.get(type='vm'):
+        if vm.get('name') == "{{ vm_name }}":
+            print(vm.get('vmid'))
+            exit(0)
+    print("")
+    exit(0)
+    EOF
+  delegate_to: localhost
+  become: false
+  register: existing_vm_check
+  changed_when: false
+  no_log: true
+
+- name: Set VM exists fact
+  ansible.builtin.set_fact:
+    vm_already_exists: "{{ existing_vm_check.stdout | trim | length > 0 }}"
+    existing_vmid: "{{ existing_vm_check.stdout | trim }}"
+
+- name: Debug VM existence
+  ansible.builtin.debug:
+    msg: "VM '{{ vm_name }}' {{ 'already exists with VMID ' + existing_vmid if vm_already_exists else 'does not exist, will clone from template' }}"
+
 - name: Clone VM from cloud-init template
   community.general.proxmox_kvm:
     api_user: ansible@pve
@@ -128,7 +162,13 @@
   become: false
   vars:
     ansible_python_interpreter: "{{ venv_path }}/bin/python"
+  when: not vm_already_exists
   register: proxvm
+
+# Set the VMID - either from the clone result or from the existing VM
+- name: Set VMID for VM operations
+  ansible.builtin.set_fact:
+    target_vmid: "{{ existing_vmid if vm_already_exists else proxvm.vmid }}"
 
 - name: Configure VM resources (CPU, Memory, Boot settings)
   community.general.proxmox_kvm:
@@ -137,7 +177,7 @@
     api_token_id: "{{ proxmox_token_id.stdout }}"
     api_token_secret: "{{ proxmox_token_secret.stdout }}"
     node: "{{ proxmox_node }}"
-    name: "{{ vm_name }}"
+    vmid: "{{ target_vmid }}"
     cores: "{{ vm_cpu_cores }}"
     memory: "{{ vm_memory_mb }}"
     onboot: "{{ vm_onboot | default(true) }}"
@@ -155,7 +195,7 @@
     api_token_id: "{{ proxmox_token_id.stdout }}"
     api_token_secret: "{{ proxmox_token_secret.stdout }}"
     node: "{{ proxmox_node }}"
-    name: "{{ vm_name }}"
+    vmid: "{{ target_vmid }}"
     net:
       net0: "virtio,bridge={{ vm_bridge }}{{ ',tag=' + (vm_vlan | string) if vm_vlan is not none and vm_vlan != '' else '' }}"
     validate_certs: false
@@ -164,24 +204,14 @@
   become: false
   vars:
     ansible_python_interpreter: "{{ venv_path }}/bin/python"
+  when: not vm_already_exists
 
 - name: Get VM ID for additional interface configuration
-  ansible.builtin.command:
-    cmd: ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no root@{{ hostvars[groups['proxmox'][0]]['ansible_host'] }} qm list
-  register: qm_list_result
-  delegate_to: localhost
-  when:
-    - vm_additional_interfaces is defined
-    - vm_additional_interfaces | length > 0
-  changed_when: false
-
-- name: Parse VM ID from qm list output
   ansible.builtin.set_fact:
-    vm_id: "{{ qm_list_result.stdout_lines | select('search', vm_name) | first | split() | first }}"
+    vm_id: "{{ target_vmid }}"
   when:
     - vm_additional_interfaces is defined
     - vm_additional_interfaces | length > 0
-    - qm_list_result.stdout_lines is defined
 
 - name: Configure additional network interfaces using qm command
   ansible.builtin.command:
@@ -191,6 +221,7 @@
     loop_var: iface
   delegate_to: localhost
   when:
+    - not vm_already_exists
     - vm_additional_interfaces is defined
     - vm_additional_interfaces | length > 0
     - vm_id is defined
@@ -199,13 +230,15 @@
   changed_when: qm_result.rc == 0
 
 - name: Resize primary disk if needed
-  when: vm_override_disk | bool
+  when: 
+    - vm_override_disk | bool
+    - not vm_already_exists
   community.general.proxmox_disk:
     api_user: ansible@pve
     api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
     api_token_id: "{{ proxmox_token_id.stdout }}"
     api_token_secret: "{{ proxmox_token_secret.stdout }}"
-    vmid: "{{ proxvm.vmid }}"
+    vmid: "{{ target_vmid }}"
     disk: scsi0
     size: "{{ vm_disk_gb }}G"
     state: resized
@@ -222,7 +255,7 @@
     api_token_id: "{{ proxmox_token_id.stdout }}"
     api_token_secret: "{{ proxmox_token_secret.stdout }}"
     node: "{{ proxmox_node }}"
-    name: "{{ vm_name }}"
+    vmid: "{{ target_vmid }}"
     ciuser: "{{ infisical_vm_ci_user.stdout }}"
     cipassword: "{{ infisical_vm_ci_password.stdout }}"
     sshkeys: "{{ infisical_vm_ci_ssh_key.stdout }}"
@@ -233,16 +266,19 @@
   become: false
   vars:
     ansible_python_interpreter: "{{ venv_path }}/bin/python"
+  when: not vm_already_exists
 
 - name: Configure static IP via cloud-init
-  when: vm_ip is not none and vm_ip != ''
+  when: 
+    - vm_ip is not none and vm_ip != ''
+    - not vm_already_exists
   community.general.proxmox_kvm:
     api_user: ansible@pve
     api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
     api_token_id: "{{ proxmox_token_id.stdout }}"
     api_token_secret: "{{ proxmox_token_secret.stdout }}"
     node: "{{ proxmox_node }}"
-    name: "{{ vm_name }}"
+    vmid: "{{ target_vmid }}"
     ipconfig:
       ipconfig0: ip={{ vm_ip }}/{{ vm_net_prefix }},gw={{ vm_net_gateway }}
     nameservers: "{{ vm_nameserver | default(vm_net_gateway) }}"
@@ -260,7 +296,7 @@
     api_token_id: "{{ proxmox_token_id.stdout }}"
     api_token_secret: "{{ proxmox_token_secret.stdout }}"
     node: "{{ proxmox_node }}"
-    name: "{{ vm_name }}"
+    vmid: "{{ target_vmid }}"
     validate_certs: false
     state: started
   delegate_to: localhost
@@ -271,20 +307,23 @@
 - name: Wait for VM to start and network to initialize
   ansible.builtin.pause:
     seconds: 5
-  when: vm_vlan is defined and vm_vlan != ''
+  when: 
+    - vm_vlan is defined and vm_vlan != ''
+    - not vm_already_exists
 
 - name: Configure VLAN on bridge for VM tap interface
   ansible.builtin.shell:
     cmd: |
       ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no root@{{ hostvars[groups['proxmox'][0]]['ansible_host'] }} \
-        "bridge vlan add vid {{ vm_vlan }} dev tap{{ proxvm.vmid }}i0 pvid untagged && \
-         bridge vlan del vid 1 dev tap{{ proxvm.vmid }}i0"
+        "bridge vlan add vid {{ vm_vlan }} dev tap{{ target_vmid }}i0 pvid untagged && \
+         bridge vlan del vid 1 dev tap{{ target_vmid }}i0"
   delegate_to: localhost
   when: 
+    - not vm_already_exists
     - vm_vlan is defined 
     - vm_vlan != ''
     - vm_vlan != 'none'
-    - proxvm.vmid is defined
+    - target_vmid is defined
   changed_when: true
   ignore_errors: yes
 

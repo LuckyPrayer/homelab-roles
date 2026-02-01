@@ -7,6 +7,10 @@ docs_server_image_name: homelab-docs
 docs_server_image_tag: latest
 docs_server_base_dir: /opt/homelab-docs
 
+# Source documentation location (on Ansible controller)
+# This should point to the homelab-docs submodule/repo
+docs_source_dir: "{{ playbook_dir }}/../docs"
+
 # Site configuration
 docs_site_name: "Homelab Documentation"
 docs_site_description: "Comprehensive documentation for Proxmox + Docker + Traefik Homelab"

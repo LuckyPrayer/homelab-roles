@@ -18,7 +18,7 @@
 
         - name: Deploy komodo-restore.sh
           ansible.builtin.copy:
-            src: "{{ role_path }}/../../../scripts/komodo-restore.sh"
+            src: "{{ playbook_dir }}/../../scripts/komodo-restore.sh"
             dest: /opt/scripts/komodo-restore.sh
             owner: root
             group: root

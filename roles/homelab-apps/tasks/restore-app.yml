@@ -52,7 +52,8 @@
     - app_restore_enabled | bool
     - data_dir_contents.matched | default(0) == 0
     - restore_app_config.restore.pre_restore is defined
-    - restore_app_config.restore.pre_restore | length > 0
+    - restore_app_config.restore.pre_restore is not none
+    - restore_app_config.restore.pre_restore | string | length > 0
   register: pre_restore_result
   failed_when: false
 
@@ -128,7 +129,8 @@
     - data_dir_contents.matched | default(0) == 0
     - restore_result is changed
     - restore_app_config.restore.post_restore is defined
-    - restore_app_config.restore.post_restore | length > 0
+    - restore_app_config.restore.post_restore is not none
+    - restore_app_config.restore.post_restore | string | length > 0
   register: post_restore_result
   failed_when: false
 
