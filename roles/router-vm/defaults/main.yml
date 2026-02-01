@@ -59,6 +59,9 @@ router_firewall_default_policy: DROP
 router_allowed_services:
   - ssh
   - dhcp  # If router provides DHCP
+  - dns   # If router provides DNS forwarding
+  - http  # For Traefik reverse proxy
+  - https # For Traefik reverse proxy
 
 # DHCP server configuration (optional)
 router_enable_dhcp: false
