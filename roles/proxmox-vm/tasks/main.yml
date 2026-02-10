@@ -170,7 +170,7 @@
   ansible.builtin.set_fact:
     target_vmid: "{{ existing_vmid if vm_already_exists else proxvm.vmid }}"
 
-- name: Configure VM resources (CPU, Memory, Boot settings)
+- name: Configure VM resources (CPU, Memory, Boot, Network)
   community.general.proxmox_kvm:
     api_user: ansible@pve
     api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
@@ -181,21 +181,6 @@
     cores: "{{ vm_cpu_cores }}"
     memory: "{{ vm_memory_mb }}"
     onboot: "{{ vm_onboot | default(true) }}"
-    validate_certs: false
-    update: true
-  delegate_to: localhost
-  become: false
-  vars:
-    ansible_python_interpreter: "{{ venv_path }}/bin/python"
-
-- name: Configure VM primary network interface (net0)
-  community.general.proxmox_kvm:
-    api_user: ansible@pve
-    api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
-    api_token_id: "{{ proxmox_token_id.stdout }}"
-    api_token_secret: "{{ proxmox_token_secret.stdout }}"
-    node: "{{ proxmox_node }}"
-    vmid: "{{ target_vmid }}"
     net:
       net0: "virtio,bridge={{ vm_bridge }}{{ ',tag=' + (vm_vlan | string) if vm_vlan is not none and vm_vlan != '' else '' }}"
     validate_certs: false
