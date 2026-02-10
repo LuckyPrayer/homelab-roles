@@ -931,31 +931,8 @@
         group: docker
         mode: '0755'
 
-    # Deploy systemd timer for automated backups
-    - name: Deploy backup systemd service (Core)
-      ansible.builtin.template:
-        src: homelab-backup.service.j2
-        dest: /etc/systemd/system/homelab-backup.service
-        owner: root
-        group: root
-        mode: '0644'
-      notify: reload systemd
-
-    - name: Deploy backup systemd timer (Core)
-      ansible.builtin.template:
-        src: homelab-backup.timer.j2
-        dest: /etc/systemd/system/homelab-backup.timer
-        owner: root
-        group: root
-        mode: '0644'
-      notify: reload systemd
-
-    - name: Enable and start backup timer (Core)
-      ansible.builtin.systemd:
-        name: homelab-backup.timer
-        enabled: yes
-        state: started
-        daemon_reload: yes
+    # NOTE: Backup systemd timer/service is deployed by the docker-backup role
+    # from the homelab-backup repo. No longer duplicated here.
 
     - name: Display Komodo Core deployment status
       ansible.builtin.debug:
@@ -1195,31 +1172,8 @@
         group: docker
         mode: '0755'
 
-    # Deploy systemd timer for automated backups
-    - name: Deploy backup systemd service (Periphery)
-      ansible.builtin.template:
-        src: homelab-backup.service.j2
-        dest: /etc/systemd/system/homelab-backup.service
-        owner: root
-        group: root
-        mode: '0644'
-      notify: reload systemd
-
-    - name: Deploy backup systemd timer (Periphery)
-      ansible.builtin.template:
-        src: homelab-backup.timer.j2
-        dest: /etc/systemd/system/homelab-backup.timer
-        owner: root
-        group: root
-        mode: '0644'
-      notify: reload systemd
-
-    - name: Enable and start backup timer (Periphery)
-      ansible.builtin.systemd:
-        name: homelab-backup.timer
-        enabled: yes
-        state: started
-        daemon_reload: yes
+    # NOTE: Backup systemd timer/service is deployed by the docker-backup role
+    # from the homelab-backup repo. No longer duplicated here.
 
     - name: Pull Komodo Periphery image
       ansible.builtin.command:

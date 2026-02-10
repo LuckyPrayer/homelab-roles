@@ -220,8 +220,8 @@
 # ============================================================================
 
 - name: Deploy homelab-backup systemd service
-  ansible.builtin.template:
-    src: homelab-backup.service.j2
+  ansible.builtin.copy:
+    src: "{{ backup_repo_path }}/systemd/homelab-backup.service"
     dest: /etc/systemd/system/homelab-backup.service
     owner: root
     group: root
@@ -230,8 +230,8 @@
   notify: Reload systemd
 
 - name: Deploy homelab-backup systemd timer
-  ansible.builtin.template:
-    src: homelab-backup.timer.j2
+  ansible.builtin.copy:
+    src: "{{ backup_repo_path }}/systemd/homelab-backup.timer"
     dest: /etc/systemd/system/homelab-backup.timer
     owner: root
     group: root
