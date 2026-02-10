@@ -127,12 +127,6 @@
     enabled: yes
     state: started
 
-- name: Restart systemd-networkd to apply changes
-  ansible.builtin.systemd:
-    name: systemd-networkd
-    state: restarted
-  when: router_interfaces | length > 0
-
 - name: Configure NAT with iptables
   when: router_enable_nat | bool
   block:

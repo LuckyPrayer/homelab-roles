@@ -196,8 +196,8 @@
   ansible.builtin.command:
     cmd: docker compose up -d
     chdir: /opt/pihole
-  changed_when: true
   register: pihole_output
+  changed_when: "'Started' in pihole_output.stderr or 'Created' in pihole_output.stderr"
 
 - name: Wait for Pi-hole to be healthy
   ansible.builtin.uri:
@@ -213,7 +213,7 @@
   ansible.builtin.command:
     cmd: docker exec pihole pihole setpassword "{{ pihole_password_actual }}"
   register: password_set_result
-  changed_when: password_set_result.rc == 0
+  changed_when: false
   no_log: true
 
 - name: Configure Pi-hole local DNS records
@@ -234,12 +234,20 @@
   notify: restart pihole
   when: dns_records is defined and dns_records | length > 0
 
+- name: Check etc_dnsmasq_d setting in Pi-hole
+  ansible.builtin.command:
+    cmd: docker exec pihole grep -c 'etc_dnsmasq_d = true' /etc/pihole/pihole.toml
+  register: pihole_dnsmasq_check
+  changed_when: false
+  failed_when: false
+
 - name: Enable etc_dnsmasq_d in Pi-hole configuration
   ansible.builtin.command:
     cmd: docker exec pihole sed -i 's/etc_dnsmasq_d = false/etc_dnsmasq_d = true/' /etc/pihole/pihole.toml
   register: pihole_config_update
-  changed_when: pihole_config_update.rc == 0
+  changed_when: true
   notify: restart pihole
+  when: pihole_dnsmasq_check.stdout | default('0') | int == 0
 
 - name: Wait for Pi-hole to restart after DNS configuration
   ansible.builtin.pause:

@@ -92,7 +92,7 @@
     - app_config.secrets.infisical_path is not none
     - app_config.secrets.infisical_path | string | length > 0
   register: deploy_with_secrets
-  changed_when: "'Created' in deploy_with_secrets.stdout or 'Started' in deploy_with_secrets.stdout"
+  changed_when: "'Created' in deploy_with_secrets.stderr or 'Started' in deploy_with_secrets.stderr"
 
 - name: "{{ app_name }} - Deploy without secrets"
   ansible.builtin.shell: |
@@ -108,7 +108,7 @@
     app_config.secrets.infisical_path is none or
     app_config.secrets.infisical_path | string | length == 0
   register: deploy_without_secrets
-  changed_when: "'Created' in deploy_without_secrets.stdout or 'Started' in deploy_without_secrets.stdout"
+  changed_when: "'Created' in deploy_without_secrets.stderr or 'Started' in deploy_without_secrets.stderr"
 
 - name: "{{ app_name }} - Wait for container to be healthy"
   ansible.builtin.shell: |

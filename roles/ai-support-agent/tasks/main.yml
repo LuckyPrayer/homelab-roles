@@ -59,8 +59,9 @@
     ssh-keygen -y -f {{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519 > {{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519.pub
     chown {{ oracle_user | default('oracle') }}:{{ oracle_user | default('oracle') }} {{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519.pub
     chmod 644 {{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519.pub
+  args:
+    creates: "{{ oracle_home | default('/home/oracle') }}/.ssh/id_ed25519.pub"
   when: oracle_ssh_private_key is defined and oracle_ssh_private_key | length > 0
-  changed_when: true
 
 - name: Create SSH config for Oracle remote access
   ansible.builtin.copy:
@@ -194,7 +195,8 @@
     cmd: docker build -t {{ oracle_image | default('homelab-oracle:latest') }} .
     chdir: /opt/oracle
   when: oracle_build_local | default(true)
-  changed_when: true
+  register: oracle_build
+  changed_when: "'exporting to image' in oracle_build.stderr | default('')"
 
 - name: Ensure homelab network exists
   ansible.builtin.command:
@@ -208,13 +210,15 @@
     cmd: docker compose pull
     chdir: /opt/oracle
   when: not (oracle_build_local | default(true))
-  changed_when: true
+  register: oracle_pull
+  changed_when: "'Pull complete' in oracle_pull.stdout or 'Downloaded' in oracle_pull.stdout"
 
 - name: Start Oracle container
   ansible.builtin.command:
     cmd: docker compose up -d
     chdir: /opt/oracle
-  changed_when: true
+  register: oracle_up
+  changed_when: "'Started' in oracle_up.stderr or 'Created' in oracle_up.stderr"
 
 - name: Display Oracle status
   ansible.builtin.debug:

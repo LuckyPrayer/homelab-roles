@@ -30,7 +30,8 @@
   ansible.builtin.command:
     cmd: docker compose up -d
     chdir: /opt/node-exporter
-  changed_when: true
+  register: node_exporter_up
+  changed_when: "'Started' in node_exporter_up.stderr or 'Created' in node_exporter_up.stderr"
 
 - name: Get node_exporter container status
   ansible.builtin.command:

@@ -130,6 +130,7 @@
     - harbor_compose_exists.stat.exists
     - harbor_config.changed
   ignore_errors: yes
+  changed_when: true
 
 # ============================================================================
 # Step 6: Run Harbor prepare script
@@ -221,6 +222,8 @@
   command:
     cmd: docker compose up -d
     chdir: "{{ harbor_install_dir }}/harbor"
+  register: harbor_start_result
+  changed_when: "'Started' in harbor_start_result.stderr | default('') or 'Created' in harbor_start_result.stderr | default('')"
   when: 
     - harbor_db_exists.stat.exists
     - harbor_compose_exists.stat.exists or harbor_install_result is skipped
@@ -274,7 +277,27 @@
   register: robot_check
   changed_when: false
 
-- name: Delete existing robot account if it exists (to refresh secret)
+- name: Check if robot credentials exist in Infisical
+  ansible.builtin.shell: |
+    infisical secrets get HARBOR_ROBOT_SECRET --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }} --plain --silent 2>/dev/null
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+  delegate_to: localhost
+  become: false
+  register: infisical_robot_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: robot_check.json | length > 0
+
+- name: Set robot account status
+  ansible.builtin.set_fact:
+    robot_needs_creation: >-
+      {{ robot_check.json | length == 0 or
+         (infisical_robot_check.rc | default(1)) != 0 or
+         (infisical_robot_check.stdout | default('')) == '' }}
+
+- name: Delete existing robot account (credentials lost, must recreate)
   uri:
     url: "http://localhost:{{ harbor_http_port }}/api/v2.0/robots/{{ robot_check.json[0].id }}"
     method: DELETE
@@ -282,8 +305,14 @@
     password: "{{ harbor_admin_password }}"
     force_basic_auth: yes
     status_code: [200, 204]
-  when: robot_check.json | length > 0
-  changed_when: true
+  when:
+    - robot_check.json | length > 0
+    - robot_needs_creation | bool
+
+- name: Skip robot account creation (already exists with valid credentials)
+  ansible.builtin.debug:
+    msg: "✓ Robot account 'docker-svc' already exists with valid Infisical credentials — skipping recreation"
+  when: not (robot_needs_creation | bool)
 
 - name: Create robot account for docker-svc
   uri:
@@ -309,33 +338,29 @@
     status_code: [201]
   register: robot_account_result
   no_log: true
+  when: robot_needs_creation | bool
 
 - name: Store robot account credentials
   ansible.builtin.set_fact:
     harbor_robot_name: "{{ robot_account_result.json.name }}"
     harbor_robot_secret: "{{ robot_account_result.json.secret }}"
   no_log: true
+  when: robot_needs_creation | bool
 
 - name: Save robot account credentials to Infisical
   ansible.builtin.shell: |
-    # Check if secret exists
     ROBOT_NAME='{{ harbor_robot_name }}'
     ROBOT_SECRET='{{ harbor_robot_secret }}'
-    if infisical secrets get HARBOR_ROBOT_NAME --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }} --plain 2>/dev/null; then
-      # Update existing secrets
-      infisical secrets set "HARBOR_ROBOT_NAME=${ROBOT_NAME}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
-      infisical secrets set "HARBOR_ROBOT_SECRET=${ROBOT_SECRET}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
-    else
-      # Create new secrets
-      infisical secrets set "HARBOR_ROBOT_NAME=${ROBOT_NAME}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
-      infisical secrets set "HARBOR_ROBOT_SECRET=${ROBOT_SECRET}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
-    fi
+    # Create or update secrets
+    infisical secrets set "HARBOR_ROBOT_NAME=${ROBOT_NAME}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
+    infisical secrets set "HARBOR_ROBOT_SECRET=${ROBOT_SECRET}" --path="{{ harbor_infisical_path }}" --env={{ infisical_env_slug }} --projectId={{ infisical_project_id }}
   environment:
     INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
   delegate_to: localhost
   become: false
   changed_when: true
   no_log: true
+  when: robot_needs_creation | bool
 
 - name: Display robot account info
   ansible.builtin.debug:

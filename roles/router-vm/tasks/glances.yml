@@ -54,4 +54,4 @@
     cd /opt/stacks/glances
     docker compose up -d
   register: glances_start
-  changed_when: "'Started' in glances_start.stdout or 'Created' in glances_start.stdout"
+  changed_when: "'Started' in glances_start.stderr or 'Created' in glances_start.stderr"

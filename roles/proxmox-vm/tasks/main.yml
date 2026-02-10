@@ -204,7 +204,6 @@
   become: false
   vars:
     ansible_python_interpreter: "{{ venv_path }}/bin/python"
-  when: not vm_already_exists
 
 - name: Get VM ID for additional interface configuration
   ansible.builtin.set_fact:
@@ -221,7 +220,6 @@
     loop_var: iface
   delegate_to: localhost
   when:
-    - not vm_already_exists
     - vm_additional_interfaces is defined
     - vm_additional_interfaces | length > 0
     - vm_id is defined
@@ -232,7 +230,6 @@
 - name: Resize primary disk if needed
   when: 
     - vm_override_disk | bool
-    - not vm_already_exists
   community.general.proxmox_disk:
     api_user: ansible@pve
     api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
@@ -266,12 +263,10 @@
   become: false
   vars:
     ansible_python_interpreter: "{{ venv_path }}/bin/python"
-  when: not vm_already_exists
 
 - name: Configure static IP via cloud-init
   when: 
     - vm_ip is not none and vm_ip != ''
-    - not vm_already_exists
   community.general.proxmox_kvm:
     api_user: ansible@pve
     api_host: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"

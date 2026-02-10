@@ -159,14 +159,16 @@
   ansible.builtin.command:
     cmd: docker compose pull
     chdir: /opt/monitoring
-  changed_when: true
+  register: monitoring_pull
+  changed_when: "'Pull complete' in monitoring_pull.stdout or 'Downloaded' in monitoring_pull.stdout"
   tags: [monitoring]
 
 - name: Start monitoring stack
   ansible.builtin.command:
     cmd: docker compose up -d
     chdir: /opt/monitoring
-  changed_when: true
+  register: monitoring_up
+  changed_when: "'Started' in monitoring_up.stderr or 'Created' in monitoring_up.stderr"
   tags: [monitoring]
 
 - name: Display monitoring stack status

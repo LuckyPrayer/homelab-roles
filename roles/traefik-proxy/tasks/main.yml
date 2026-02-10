@@ -16,11 +16,29 @@
     creates: /etc/apt/sources.list.d/infisical.list
   when: infisical_check.rc != 0
 
-- name: Ensure Docker is installed
+- name: Check if Docker is installed
+  ansible.builtin.command: docker --version
+  register: docker_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Docker (only if docker-host role has not run)
   ansible.builtin.apt:
     name:
       - docker.io
       - docker-compose
+    state: present
+    update_cache: yes
+  become: yes
+  register: apt_docker_result
+  retries: 5
+  delay: 30
+  until: apt_docker_result is succeeded
+  when: docker_check.rc != 0
+
+- name: Ensure Infisical is installed
+  ansible.builtin.apt:
+    name:
       - infisical
     state: present
     update_cache: yes

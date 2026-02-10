@@ -232,13 +232,15 @@
       ansible.builtin.command:
         cmd: docker compose pull
         chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
-      changed_when: true
+      register: komodo_core_pull
+      changed_when: "'Pull complete' in komodo_core_pull.stdout or 'Downloaded' in komodo_core_pull.stdout"
 
     - name: Start Komodo Core stack
       ansible.builtin.command:
         cmd: docker compose up -d
         chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
-      changed_when: true
+      register: komodo_core_up
+      changed_when: "'Started' in komodo_core_up.stderr or 'Created' in komodo_core_up.stderr"
 
     - name: Wait for Komodo Core to be healthy
       ansible.builtin.uri:
@@ -1179,13 +1181,15 @@
       ansible.builtin.command:
         cmd: docker compose pull
         chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
-      changed_when: true
+      register: komodo_periphery_pull
+      changed_when: "'Pull complete' in komodo_periphery_pull.stdout or 'Downloaded' in komodo_periphery_pull.stdout"
 
     - name: Start Komodo Periphery agent
       ansible.builtin.command:
         cmd: docker compose up -d
         chdir: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo"
-      changed_when: true
+      register: komodo_periphery_up
+      changed_when: "'Started' in komodo_periphery_up.stderr or 'Created' in komodo_periphery_up.stderr"
 
     - name: Wait for Komodo Periphery port to be available
       ansible.builtin.wait_for:

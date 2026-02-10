@@ -39,4 +39,4 @@
   ansible.builtin.shell: |
     cd /opt/stacks/glances
     docker compose down && docker compose up -d
-  changed_when: true
+  changed_when: true  # Handler always implies a change triggered it
