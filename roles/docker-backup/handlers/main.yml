@@ -8,7 +8,7 @@
 
 - name: Restart backup timer
   ansible.builtin.systemd:
-    name: docker-backup.timer
+    name: homelab-backup.timer
     state: restarted
   become: true
   when: backup_enabled | bool

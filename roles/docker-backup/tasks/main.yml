@@ -1,7 +1,8 @@
 ---
 # Docker Backup Role - Main Tasks
-# This role fetches backup credentials and ensures restic is installed
-# The actual backup scheduling is handled by homelab-backup.timer from the komodo role
+# This role deploys backup/restore scripts from the homelab-backup repo,
+# installs dependencies (restic, yq), creates backup.env with Infisical
+# secrets, and sets up the homelab-backup systemd timer.
 
 # ============================================================================
 # Fetch secrets from Infisical
@@ -143,26 +144,135 @@
     msg: "Restic installed: {{ restic_version.stdout }}"
 
 # ============================================================================
-# Display backup info
+# Deploy backup/restore scripts from homelab-backup repo
+# ============================================================================
+
+- name: Verify homelab-backup repo exists on controller
+  ansible.builtin.stat:
+    path: "{{ backup_repo_path }}/scripts/backup.sh"
+  delegate_to: localhost
+  become: false
+  register: backup_repo_check
+
+- name: Fail if homelab-backup repo not found
+  ansible.builtin.fail:
+    msg: >
+      homelab-backup repo not found at {{ backup_repo_path }}.
+      Run 'ansible-playbook playbooks/bootstrap.yml' first to clone it.
+  when: not backup_repo_check.stat.exists
+
+- name: Create scripts directory
+  ansible.builtin.file:
+    path: "{{ backup_scripts_dest }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Deploy backup.sh
+  ansible.builtin.copy:
+    src: "{{ backup_repo_path }}/scripts/backup.sh"
+    dest: "{{ backup_scripts_dest }}/backup.sh"
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Deploy restore.sh
+  ansible.builtin.copy:
+    src: "{{ backup_repo_path }}/scripts/restore.sh"
+    dest: "{{ backup_scripts_dest }}/restore.sh"
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+# ============================================================================
+# Deploy backup.env with Infisical secrets
+# ============================================================================
+
+- name: Deploy backup.env
+  ansible.builtin.copy:
+    content: |
+      # Backblaze B2 Configuration (native restic backend)
+      B2_ACCOUNT_ID={{ backup_b2_account_id }}
+      B2_ACCOUNT_KEY={{ backup_b2_account_key }}
+      B2_BUCKET={{ backup_b2_bucket }}
+
+      # Restic encryption password
+      RESTIC_PASSWORD={{ backup_restic_password }}
+
+      # Discord Notifications
+      DISCORD_WEBHOOK_URL={{ backup_discord_webhook | default('') }}
+
+      # Host identification
+      HOSTNAME_PREFIX={{ inventory_hostname }}
+    dest: "{{ backup_scripts_dest }}/backup.env"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  become: true
+
+# ============================================================================
+# Deploy systemd timer for automated backups
+# ============================================================================
+
+- name: Deploy homelab-backup systemd service
+  ansible.builtin.template:
+    src: homelab-backup.service.j2
+    dest: /etc/systemd/system/homelab-backup.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd
+
+- name: Deploy homelab-backup systemd timer
+  ansible.builtin.template:
+    src: homelab-backup.timer.j2
+    dest: /etc/systemd/system/homelab-backup.timer
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd
+
+- name: Enable and start backup timer
+  ansible.builtin.systemd:
+    name: homelab-backup.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  become: true
+  when: backup_enabled | bool
+
+# ============================================================================
+# Display summary
 # ============================================================================
 
 - name: Display backup configuration
   ansible.builtin.debug:
     msg:
-      - "Docker backup role configured successfully!"
+      - "✅ Docker backup role configured successfully!"
       - ""
-      - "Backup scheduling is handled by homelab-backup.timer (from komodo role)"
-      - "Scripts location: /opt/scripts/komodo-backup.sh, /opt/scripts/komodo-restore.sh"
+      - "Scripts deployed to {{ backup_scripts_dest }}:"
+      - "  - {{ backup_scripts_dest }}/backup.sh"
+      - "  - {{ backup_scripts_dest }}/restore.sh"
+      - "  - {{ backup_scripts_dest }}/backup.env"
+      - ""
+      - "Systemd timer: homelab-backup.timer (daily at 3 AM)"
       - ""
       - "Manual commands:"
       - "  - Check timer: systemctl status homelab-backup.timer"
-      - "  - Run backup: sudo /opt/scripts/komodo-backup.sh all full"
-      - "  - Restore: sudo /opt/scripts/komodo-restore.sh <stack> latest"
+      - "  - Run backup:  sudo {{ backup_scripts_dest }}/backup.sh all full"
+      - "  - Restore:     sudo {{ backup_scripts_dest }}/restore.sh <stack> latest"
 
 # ============================================================================
 # Include restore tasks if enabled (for pre-deployment restore)
 # ============================================================================
 
-- name: Include komodo restore tasks
-  ansible.builtin.include_tasks: restore-komodo.yml
+- name: Include pre-deployment restore tasks
+  ansible.builtin.include_tasks: restore.yml
   when: restore_enabled | default(false) | bool

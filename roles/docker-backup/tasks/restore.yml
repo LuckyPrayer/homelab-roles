@@ -1,65 +1,10 @@
 ---
-# Docker Backup Role - Pre-Restore using Komodo Scripts
-# This variant uses the new komodo-restore.sh with per-host B2 paths
-# It's designed to restore data BEFORE containers start
+# Docker Backup Role - Pre-Deployment Restore
+# Restores data from B2 backups BEFORE containers start.
+# Scripts and credentials are already deployed by the main tasks.
 
-- name: Pre-restore using Komodo scripts
-  when: restore_use_komodo_scripts | default(true)
+- name: Pre-deployment restore
   block:
-    - name: Deploy komodo restore scripts for pre-restore
-      block:
-        - name: Create scripts directory
-          ansible.builtin.file:
-            path: /opt/scripts
-            state: directory
-            owner: root
-            group: root
-            mode: '0755'
-
-        - name: Deploy komodo-restore.sh
-          ansible.builtin.copy:
-            src: "{{ playbook_dir }}/../../scripts/komodo-restore.sh"
-            dest: /opt/scripts/komodo-restore.sh
-            owner: root
-            group: root
-            mode: '0755'
-
-        - name: Create backup.env file
-          ansible.builtin.copy:
-            content: |
-              # Backblaze B2 Configuration (native restic backend)
-              B2_ACCOUNT_ID={{ backup_b2_account_id }}
-              B2_ACCOUNT_KEY={{ backup_b2_account_key }}
-              B2_BUCKET={{ backup_b2_bucket }}
-              
-              # Restic encryption password
-              RESTIC_PASSWORD={{ backup_restic_password }}
-              
-              # Discord Notifications
-              DISCORD_WEBHOOK_URL={{ backup_discord_webhook | default('') }}
-              
-              # Host identification
-              HOSTNAME_PREFIX={{ inventory_hostname }}
-            dest: /opt/scripts/backup.env
-            owner: root
-            group: root
-            mode: '0600'
-          no_log: true
-
-        - name: Install restic if not present
-          ansible.builtin.shell: |
-            if ! command -v restic &> /dev/null; then
-              curl -L https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 -o /tmp/restic.bz2
-              bunzip2 -f /tmp/restic.bz2
-              mv /tmp/restic /usr/local/bin/restic
-              chmod +x /usr/local/bin/restic
-              echo "changed"
-            else
-              echo "ok"
-            fi
-          register: restic_install_prerestore
-          changed_when: restic_install_prerestore.stdout == "changed"
-
     - name: Check for available snapshots
       ansible.builtin.shell: |
         source /opt/scripts/backup.env
@@ -82,7 +27,7 @@
       ansible.builtin.debug:
         msg:
           - "╔════════════════════════════════════════════════════════════════╗"
-          - "║          Pre-Deployment Restore (Komodo Scripts)               ║"
+          - "║              Pre-Deployment Restore from B2                    ║"
           - "╚════════════════════════════════════════════════════════════════╝"
           - ""
           - "🔍 Checking for existing backups for {{ inventory_hostname }}..."
@@ -117,7 +62,7 @@
 
         - name: Execute Harbor pre-restore
           ansible.builtin.shell: |
-            /opt/scripts/komodo-restore.sh harbor latest --data-only 2>&1
+            {{ backup_scripts_dest }}/restore.sh harbor latest --data-only 2>&1
           register: harbor_restore_result
           become: true
           failed_when: false
@@ -169,7 +114,7 @@
 
         - name: Execute stack pre-restore
           ansible.builtin.shell: |
-            /opt/scripts/komodo-restore.sh {{ item }} latest --data-only 2>&1
+            {{ backup_scripts_dest }}/restore.sh {{ item }} latest --data-only 2>&1
           loop: "{{ backed_up_stacks.stdout_lines }}"
           register: stack_restore_results
           become: true
@@ -214,7 +159,7 @@
 
         - name: Execute Komodo MongoDB pre-restore
           ansible.builtin.shell: |
-            /opt/scripts/komodo-restore.sh komodo latest --data-only 2>&1
+            {{ backup_scripts_dest }}/restore.sh komodo latest --data-only 2>&1
           register: komodo_restore_result
           become: true
           failed_when: false

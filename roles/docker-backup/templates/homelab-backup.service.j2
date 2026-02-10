@@ -5,12 +5,12 @@ Wants=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/scripts/backup.sh all full
+ExecStart={{ backup_scripts_dest }}/backup.sh all full
 User=root
 Group=root
 
 # Environment
-EnvironmentFile=-/opt/scripts/backup.env
+EnvironmentFile=-{{ backup_scripts_dest }}/backup.env
 
 # Logging
 StandardOutput=journal
