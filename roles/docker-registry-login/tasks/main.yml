@@ -1,0 +1,78 @@
+---
+# Docker Registry Login Role
+# Authenticates Docker to the private Harbor registry so hosts can pull images.
+# Fetches robot account credentials from Infisical and runs docker login.
+#
+# Required variables:
+#   - harbor_hostname (from harbor role defaults or inventory)
+#   - harbor_infisical_path (defaults to /infrastructure/harbor)
+#   - infisical_env_slug (from inventory)
+#   - infisical_project_id (from inventory)
+
+- name: Set Harbor registry login defaults
+  ansible.builtin.set_fact:
+    _harbor_hostname: "{{ harbor_hostname | default('harbor.' + env + '.' + base_domain) }}"
+    _harbor_infisical_path: "{{ harbor_infisical_path | default('/infrastructure/harbor') }}"
+
+- name: Fetch Harbor robot account name from Infisical
+  ansible.builtin.command:
+    cmd: >-
+      infisical secrets get HARBOR_ROBOT_NAME
+      --path={{ _harbor_infisical_path }}
+      --env={{ infisical_env_slug }}
+      --projectId={{ infisical_project_id }}
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+  register: harbor_robot_name_result
+  changed_when: false
+  no_log: true
+
+- name: Fetch Harbor robot account secret from Infisical
+  ansible.builtin.command:
+    cmd: >-
+      infisical secrets get HARBOR_ROBOT_SECRET
+      --path={{ _harbor_infisical_path }}
+      --env={{ infisical_env_slug }}
+      --projectId={{ infisical_project_id }}
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+  register: harbor_robot_secret_result
+  changed_when: false
+  no_log: true
+
+- name: Validate Harbor robot credentials were retrieved
+  ansible.builtin.assert:
+    that:
+      - harbor_robot_name_result.stdout | default('') | trim | length > 0
+      - harbor_robot_secret_result.stdout | default('') | trim | length > 0
+    fail_msg: >-
+      Failed to retrieve Harbor robot credentials from Infisical at
+      {{ _harbor_infisical_path }}. Ensure the Harbor role has created
+      the robot account and stored credentials in Infisical.
+    success_msg: "Harbor robot credentials retrieved successfully"
+
+- name: Log in to Harbor registry
+  ansible.builtin.command:
+    cmd: >-
+      docker login {{ _harbor_hostname }}
+      --username {{ harbor_robot_name_result.stdout | trim }}
+      --password-stdin
+    stdin: "{{ harbor_robot_secret_result.stdout | trim }}"
+  changed_when: true
+  no_log: true
+
+- name: Verify Docker can access Harbor registry
+  ansible.builtin.command:
+    cmd: "docker pull {{ _harbor_hostname }}/library/alpine:latest"
+  register: harbor_pull_test
+  changed_when: false
+  failed_when: false
+
+- name: Display Harbor registry login status
+  ansible.builtin.debug:
+    msg: >-
+      {{ '✓' if harbor_pull_test.rc == 0 else '⚠' }}
+      Docker logged in to Harbor registry at {{ _harbor_hostname }}
+      {{ '(pull test passed)' if harbor_pull_test.rc == 0 else '(pull test failed - library/alpine may not exist, but login succeeded)' }}

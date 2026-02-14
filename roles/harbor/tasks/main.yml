@@ -13,6 +13,27 @@
 # Step 1: Fetch secrets from Infisical (delegated to localhost)
 # ============================================================================
 
+- name: Fetch per-app Infisical token for Harbor
+  shell: |
+    infisical secrets get HARBOR_INFISICAL_TOKEN \
+      --path=/infrastructure/tokens \
+      --env={{ infisical_env_slug }} \
+      --projectId={{ infisical_project_id }} \
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+  register: harbor_per_app_token_result
+  changed_when: false
+  no_log: true
+  delegate_to: localhost
+  become: false
+  when: harbor_use_per_app_token | default(true)
+
+- name: Set Infisical token to use
+  set_fact:
+    harbor_infisical_token: "{{ harbor_per_app_token_result.stdout if (harbor_use_per_app_token | default(true) and harbor_per_app_token_result is not skipped) else lookup('env', 'INFISICAL_TOKEN') }}"
+  no_log: true
+
 - name: Fetch Harbor admin password from Infisical
   shell: |
     infisical secrets get HARBOR_ADMIN_PASSWORD \
@@ -21,7 +42,7 @@
       --projectId={{ infisical_project_id }} \
       --plain --silent
   environment:
-    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_TOKEN: "{{ harbor_infisical_token }}"
   register: harbor_admin_password_result
   changed_when: false
   no_log: true
@@ -36,7 +57,7 @@
       --projectId={{ infisical_project_id }} \
       --plain --silent
   environment:
-    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_TOKEN: "{{ harbor_infisical_token }}"
   register: harbor_db_password_result
   changed_when: false
   no_log: true
@@ -206,6 +227,14 @@
       - "Harbor database exists: {{ harbor_db_exists.stat.exists }}"
       - "Harbor registry exists: {{ harbor_registry_exists.stat.exists }}"
 
+# Check if Harbor containers are already running before we start/restart
+# This is needed to detect if containers need force-recreation after data restore
+- name: Check if Harbor registry container is already running
+  command: docker ps --filter "name=^registry$" --format "{{ '{{' }}.Names{{ '}}' }}"
+  register: harbor_registry_running
+  changed_when: false
+  failed_when: false
+
 # CRITICAL: Only run install.sh for truly fresh installs (no database)
 # install.sh creates a new empty database, which would overwrite restored data
 - name: Run Harbor install script (fresh install only - NO existing database)
@@ -215,6 +244,9 @@
   when: 
     - not harbor_db_exists.stat.exists
   register: harbor_install_result
+  retries: 3
+  delay: 15
+  until: harbor_install_result.rc == 0
 
 # If database exists (restored), just start Harbor with docker compose
 # The prepare script must have run first to generate docker-compose.yml
@@ -224,9 +256,31 @@
     chdir: "{{ harbor_install_dir }}/harbor"
   register: harbor_start_result
   changed_when: "'Started' in harbor_start_result.stderr | default('') or 'Created' in harbor_start_result.stderr | default('')"
+  retries: 3
+  delay: 15
+  until: harbor_start_result.rc == 0
   when: 
     - harbor_db_exists.stat.exists
     - harbor_compose_exists.stat.exists or harbor_install_result is skipped
+
+# CRITICAL FIX: When Harbor containers were already running before this role,
+# and backup data was restored to the host filesystem, the containers' bind mounts
+# may not reflect the restored files (especially with containerd snapshotter).
+# Force-recreating containers ensures they get fresh bind mounts with restored data.
+- name: Force recreate Harbor containers to pick up restored data
+  command:
+    cmd: docker compose up -d --force-recreate
+    chdir: "{{ harbor_install_dir }}/harbor"
+  register: harbor_recreate_result
+  changed_when: true
+  retries: 3
+  delay: 15
+  until: harbor_recreate_result.rc == 0
+  when:
+    - harbor_registry_running.stdout | default('') | length > 0
+    - harbor_registry_exists.stat.exists
+    - harbor_db_exists.stat.exists
+    - not (harbor_config.changed | default(false))
 
 # ============================================================================
 # Step 8: Create symlink for backup/restore script compatibility
@@ -368,6 +422,7 @@
       - "Robot account created: {{ harbor_robot_name }}"
       - "Credentials stored in Infisical at {{ harbor_infisical_path }}"
       - "Use for docker login: docker login {{ harbor_hostname }} -u {{ harbor_robot_name }}"
+  when: robot_needs_creation | bool
 
 # ============================================================================
 # Step 11: Display deployment information

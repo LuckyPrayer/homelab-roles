@@ -5,19 +5,41 @@
 # secrets, and sets up the homelab-backup systemd timer.
 
 # ============================================================================
-# Fetch secrets from Infisical
+# Fetch per-app token (if enabled)
 # ============================================================================
 
-- name: Retrieve RESTIC_PASSWORD from Infisical
+- name: Fetch per-app Infisical token for Backup
   ansible.builtin.shell: |
-    infisical secrets get RESTIC_PASSWORD --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
-  register: backup_restic_password_result
+    infisical secrets get BACKUP_INFISICAL_TOKEN --path="/infrastructure/tokens" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  register: backup_per_app_token_result
   delegate_to: localhost
   become: false
   changed_when: false
   no_log: true
   environment:
     INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  when: backup_use_per_app_token | default(true)
+
+- name: Set Infisical token to use for backup secrets
+  ansible.builtin.set_fact:
+    backup_infisical_token: "{{ backup_per_app_token_result.stdout if (backup_use_per_app_token | default(true) and backup_per_app_token_result is not skipped) else lookup('env', 'INFISICAL_TOKEN') }}"
+  no_log: true
+
+# ============================================================================
+# Fetch secrets from Infisical
+# ============================================================================
+
+- name: Retrieve RESTIC_PASSWORD from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get RESTIC_PASSWORD --path="{{ backup_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  register: backup_restic_password_result
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+  environment:
+    INFISICAL_TOKEN: "{{ backup_infisical_token }}"
     INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
 
 - name: Set RESTIC_PASSWORD fact
@@ -27,14 +49,14 @@
 
 - name: Retrieve B2_ACCOUNT_ID from Infisical
   ansible.builtin.shell: |
-    infisical secrets get B2_ACCOUNT_ID --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+    infisical secrets get B2_ACCOUNT_ID --path="{{ backup_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
   register: backup_b2_account_id_result
   delegate_to: localhost
   become: false
   changed_when: false
   no_log: true
   environment:
-    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_TOKEN: "{{ backup_infisical_token }}"
     INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
 
 - name: Set B2_ACCOUNT_ID fact
@@ -44,14 +66,14 @@
 
 - name: Retrieve B2_ACCOUNT_KEY from Infisical
   ansible.builtin.shell: |
-    infisical secrets get B2_ACCOUNT_KEY --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+    infisical secrets get B2_ACCOUNT_KEY --path="{{ backup_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
   register: backup_b2_account_key_result
   delegate_to: localhost
   become: false
   changed_when: false
   no_log: true
   environment:
-    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_TOKEN: "{{ backup_infisical_token }}"
     INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
 
 - name: Set B2_ACCOUNT_KEY fact
@@ -61,14 +83,14 @@
 
 - name: Retrieve B2_BUCKET from Infisical
   ansible.builtin.shell: |
-    infisical secrets get B2_BUCKET --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+    infisical secrets get B2_BUCKET --path="{{ backup_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
   register: backup_b2_bucket_result
   delegate_to: localhost
   become: false
   changed_when: false
   no_log: true
   environment:
-    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+    INFISICAL_TOKEN: "{{ backup_infisical_token }}"
     INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
 
 - name: Set B2_BUCKET fact
@@ -108,9 +130,10 @@
 
 - name: Install restic
   ansible.builtin.shell: |
+    set -e
     if ! command -v restic &> /dev/null; then
-      curl -L https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 -o /tmp/restic.bz2
-      bunzip2 /tmp/restic.bz2
+      curl -fL --retry 3 --retry-delay 5 https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 -o /tmp/restic.bz2
+      bunzip2 -f /tmp/restic.bz2
       mv /tmp/restic /usr/local/bin/restic
       chmod +x /usr/local/bin/restic
       echo "changed"
@@ -119,12 +142,16 @@
     fi
   register: restic_install
   changed_when: restic_install.stdout == "changed"
+  retries: 3
+  delay: 10
+  until: restic_install.rc == 0
   become: true
 
 - name: Install yq for config-driven backups
   ansible.builtin.shell: |
+    set -e
     if ! command -v yq &> /dev/null; then
-      curl -L https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64 -o /usr/local/bin/yq
+      curl -fL --retry 3 --retry-delay 5 https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64 -o /usr/local/bin/yq
       chmod +x /usr/local/bin/yq
       echo "changed"
     else
@@ -132,6 +159,9 @@
     fi
   register: yq_install
   changed_when: yq_install.stdout == "changed"
+  retries: 3
+  delay: 10
+  until: yq_install.rc == 0
   become: true
 
 - name: Verify restic installation
