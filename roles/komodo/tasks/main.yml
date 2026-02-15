@@ -543,6 +543,46 @@
         - komodo_sync_check is failed or komodo_sync_check.status != 200
       ignore_errors: true
 
+    # Ensure ResourceSync config is correct even if it already existed
+    # (e.g. restored from MongoDB backup with stale/wrong config)
+    # Note: Komodo API accepts name or id for UpdateResourceSync
+    - name: Update ResourceSync config to ensure files_on_host mode
+      ansible.builtin.uri:
+        url: "http://localhost:9120/write"
+        method: POST
+        body_format: json
+        body:
+          type: "UpdateResourceSync"
+          params:
+            id: "homelab"
+            config:
+              files_on_host: true
+              resource_path:
+                - "homelab.toml"
+              managed: true
+              delete: false
+        headers:
+          Authorization: "{{ komodo_login.json.jwt }}"
+        status_code: [200, 201]
+        return_content: true
+      register: komodo_sync_update
+      when:
+        - komodo_login is succeeded
+        - komodo_login.json.jwt is defined
+        - komodo_sync_check is succeeded
+        - komodo_sync_check.status == 200
+      ignore_errors: true
+
+    - name: Display ResourceSync update status
+      ansible.builtin.debug:
+        msg: >-
+          {{ '✓ ResourceSync config updated (files_on_host: true, resource_path: homelab.toml)'
+             if komodo_sync_update is succeeded
+             else '⚠ ResourceSync config update skipped or failed' }}
+      when:
+        - komodo_sync_update is defined
+        - komodo_sync_update is not skipped
+
     - name: Run ResourceSync to import resources
       ansible.builtin.uri:
         url: "http://localhost:9120/execute"
@@ -568,7 +608,7 @@
     - name: Display ResourceSync status
       ansible.builtin.debug:
         msg:
-          - "{{ '✓ ResourceSync created successfully!' if komodo_sync_create is succeeded else '⚠ ResourceSync may already exist or creation skipped' }}"
+          - "{{ '✓ ResourceSync created successfully!' if komodo_sync_create is succeeded and komodo_sync_create is not skipped else ('✓ ResourceSync config updated (existing sync)' if komodo_sync_update is defined and komodo_sync_update is succeeded and komodo_sync_update is not skipped else '⚠ ResourceSync may already exist or creation skipped') }}"
           - "{{ '✓ ResourceSync executed successfully!' if komodo_sync_run is succeeded else '⚠ ResourceSync execution skipped or failed' }}"
       when: komodo_login is succeeded
 
