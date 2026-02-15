@@ -25,6 +25,11 @@
     state: present
     update_cache: true
 
+- name: Mark homelab-apps directory as safe for git
+  ansible.builtin.command:
+    cmd: git config --global --add safe.directory {{ homelab_apps_path }}
+  changed_when: false
+
 - name: Clone homelab-apps repository
   ansible.builtin.git:
     repo: "{{ homelab_apps_repo | default('https://github.com/LuckyPrayer/homelab-apps.git') }}"

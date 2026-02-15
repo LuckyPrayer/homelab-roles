@@ -577,10 +577,37 @@
     # ========================================================================
     - name: Wait for ResourceSync to complete processing
       ansible.builtin.pause:
-        seconds: 10
+        seconds: 30
       when:
         - komodo_sync_run is succeeded
         - komodo_auto_deploy | default(true)
+
+    - name: Verify procedures exist after ResourceSync
+      ansible.builtin.uri:
+        url: "http://localhost:9120/read"
+        method: POST
+        body_format: json
+        body:
+          type: "ListProcedures"
+          params: {}
+        headers:
+          Authorization: "{{ komodo_login.json.jwt }}"
+        status_code: [200]
+        return_content: true
+      register: komodo_procedures_list
+      when:
+        - komodo_login is succeeded
+        - komodo_login.json.jwt is defined
+      retries: 5
+      delay: 10
+      until: komodo_procedures_list is succeeded and (komodo_procedures_list.content | default('') is search('deploy-all-' + (env | default('dev'))))
+      ignore_errors: true
+
+    - name: Display available procedures
+      ansible.builtin.debug:
+        msg: "Available procedures: {{ (komodo_procedures_list.json | default([])) | map(attribute='name') | list | default(['none found']) }}"
+      when: komodo_procedures_list is defined and komodo_procedures_list is succeeded
+      ignore_errors: true
 
     - name: Run deploy-all procedure to start all stacks
       ansible.builtin.uri:
@@ -601,8 +628,8 @@
         - komodo_login.json.jwt is defined
         - komodo_sync_run is succeeded
         - komodo_auto_deploy | default(true)
-      retries: 3
-      delay: 10
+      retries: 5
+      delay: 15
       until: komodo_deploy_all is succeeded
       ignore_errors: true
 

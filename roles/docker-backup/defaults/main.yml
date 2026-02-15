@@ -24,6 +24,7 @@ backup_scripts_dest: "/opt/scripts"
 # ============================================================================
 # Restic / B2 credentials (populated at runtime from Infisical)
 # ============================================================================
+backup_infisical_path: "/infrastructure/backup"
 backup_restic_password: ""
 backup_b2_account_id: ""
 backup_b2_account_key: ""

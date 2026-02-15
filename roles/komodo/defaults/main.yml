@@ -71,12 +71,14 @@ komodo_auto_restore: false  # Set to true if not using pre-restore
 # komodo_auto_deploy_minecraft: Automatically deploy Minecraft stacks after Harbor restore
 # Requires Harbor to be restored first (needs the minecraft-server image)
 # Deploys Minecraft containers using images from restored Harbor registry
-komodo_auto_deploy_minecraft: true
+# NOTE: Minecraft is deployed via homelab-apps role, not Komodo procedures
+komodo_auto_deploy_minecraft: false
 
 # komodo_auto_restore_minecraft: Automatically restore Minecraft world data from B2 backup
 # Runs after Minecraft stacks are deployed to restore world saves
 # Restores all world data, player data, and server configuration
-komodo_auto_restore_minecraft: true
+# NOTE: Minecraft is deployed via homelab-apps role, not Komodo procedures
+komodo_auto_restore_minecraft: false
 
 # ============================================================================
 # RESOURCE LIMITS
