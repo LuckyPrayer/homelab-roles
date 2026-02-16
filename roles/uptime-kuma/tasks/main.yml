@@ -1,0 +1,89 @@
+---
+# Uptime Kuma Role - Main Tasks
+# Deploys Uptime Kuma status monitoring on AWS cloud hosts (pharos)
+#
+# This provides external monitoring of homelab services from outside the network,
+# verifying services are accessible from the internet.
+
+- name: Check if uptime_kuma_enabled
+  ansible.builtin.debug:
+    msg: "Uptime Kuma deployment {{ 'enabled' if uptime_kuma_enabled | default(false) else 'skipped' }}"
+  tags: [uptime-kuma]
+
+- name: Create Uptime Kuma directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0755"
+  loop:
+    - "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}"
+    - "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}/data"
+  when: uptime_kuma_enabled | default(false)
+  tags: [uptime-kuma]
+
+- name: Create Docker network for Uptime Kuma
+  community.docker.docker_network:
+    name: "{{ uptime_kuma_network | default('uptime-kuma-net') }}"
+    state: present
+  when: uptime_kuma_enabled | default(false)
+  tags: [uptime-kuma]
+
+- name: Template Uptime Kuma docker-compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart uptime-kuma
+  when: uptime_kuma_enabled | default(false)
+  tags: [uptime-kuma]
+
+- name: Template Uptime Kuma environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart uptime-kuma
+  when: uptime_kuma_enabled | default(false)
+  tags: [uptime-kuma]
+
+- name: Start Uptime Kuma with docker compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}"
+    state: present
+    pull: always
+  register: uptime_kuma_compose
+  when: uptime_kuma_enabled | default(false)
+  tags: [uptime-kuma]
+
+- name: Wait for Uptime Kuma to be healthy
+  ansible.builtin.uri:
+    url: "http://localhost:{{ uptime_kuma_port | default(3001) }}"
+    status_code: [200, 301, 302]
+  register: uptime_kuma_health
+  until: uptime_kuma_health.status in [200, 301, 302]
+  retries: 30
+  delay: 5
+  when: uptime_kuma_enabled | default(false)
+  tags: [uptime-kuma]
+
+- name: Display Uptime Kuma status
+  ansible.builtin.debug:
+    msg:
+      - "╔════════════════════════════════════════════════════════════════╗"
+      - "║             Uptime Kuma Deployed Successfully!                 ║"
+      - "╚════════════════════════════════════════════════════════════════╝"
+      - ""
+      - "Access URL: http://{{ ansible_host }}:{{ uptime_kuma_port | default(3001) }}"
+      - ""
+      - "First-time setup:"
+      - "  1. Visit the URL above to create admin account"
+      - "  2. Add monitors for your homelab services"
+      - "  3. Configure notification channels (Discord, etc.)"
+  when: uptime_kuma_enabled | default(false)
+  tags: [uptime-kuma]

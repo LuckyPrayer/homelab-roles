@@ -1,0 +1,44 @@
+---
+# Traefik AWS Role Defaults
+# This role deploys Traefik on AWS hosts (e.g., pharos) for direct HTTPS termination
+
+# Traefik version
+traefik_aws_image: "traefik:2.11"
+
+# Installation directory
+traefik_aws_base_dir: "/opt/traefik"
+
+# Traefik configuration
+traefik_aws_email: "admin@{{ base_domain }}"
+traefik_aws_log_level: "INFO"
+
+# Certificate resolver
+traefik_aws_cert_resolver: "letsencrypt"
+traefik_aws_use_dns_challenge: true
+traefik_aws_dns_provider: "cloudflare"
+
+# Infisical configuration for fetching Cloudflare token
+traefik_aws_infisical_token: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+traefik_aws_infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+traefik_aws_infisical_env: "{{ env | default('dev') }}"
+traefik_aws_infisical_path: "/infrastructure/dns/cloudflare"
+traefik_aws_cf_secret_name: "CLOUDFLARE_API_TOKEN"
+
+# Entrypoints
+traefik_aws_http_port: 80
+traefik_aws_https_port: 443
+traefik_aws_dashboard_port: 8080
+
+# Dashboard
+traefik_aws_enable_dashboard: true
+traefik_aws_dashboard_host: "traefik.{{ env }}.{{ base_domain }}"
+
+# Docker network - shared with other services
+traefik_aws_network_name: "traefik-net"
+
+# Container name
+traefik_aws_container_name: "traefik"
+
+# Memory limits
+traefik_aws_memory_limit: "256m"
+traefik_aws_memory_reservation: "128m"

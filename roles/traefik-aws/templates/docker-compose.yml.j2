@@ -1,0 +1,96 @@
+# Traefik Reverse Proxy for AWS Hosts
+# Provides HTTPS termination with Let's Encrypt certificates via Cloudflare DNS
+
+services:
+  traefik:
+    image: {{ traefik_aws_image }}
+    container_name: {{ traefik_aws_container_name }}
+    restart: unless-stopped
+    command:
+      # API and Dashboard
+      - --api.dashboard={{ traefik_aws_enable_dashboard | default(true) | lower }}
+      - --api.insecure=false
+      - --ping=true
+      
+      # Entrypoints
+      - --entrypoints.web.address=:{{ traefik_aws_http_port }}
+      - --entrypoints.websecure.address=:{{ traefik_aws_https_port }}
+      - --entrypoints.traefik.address=:{{ traefik_aws_dashboard_port }}
+      
+      # HTTP to HTTPS redirect
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      
+      # Docker provider
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network={{ traefik_aws_network_name }}
+      
+      # File provider for additional configuration
+      - --providers.file.directory=/config
+      - --providers.file.watch=true
+      
+{% if traefik_aws_use_dns_challenge %}
+      # Let's Encrypt with Cloudflare DNS challenge
+      - --certificatesresolvers.{{ traefik_aws_cert_resolver }}.acme.dnschallenge=true
+      - --certificatesresolvers.{{ traefik_aws_cert_resolver }}.acme.dnschallenge.provider={{ traefik_aws_dns_provider }}
+      - --certificatesresolvers.{{ traefik_aws_cert_resolver }}.acme.email={{ traefik_aws_email }}
+      - --certificatesresolvers.{{ traefik_aws_cert_resolver }}.acme.storage=/letsencrypt/acme.json
+{% endif %}
+      
+      # Logging
+      - --log.level={{ traefik_aws_log_level }}
+      - --accesslog=true
+      - --accesslog.filepath=/logs/access.log
+      
+      # Metrics
+      - --metrics.prometheus=true
+    
+    ports:
+      - "{{ traefik_aws_http_port }}:{{ traefik_aws_http_port }}"
+      - "{{ traefik_aws_https_port }}:{{ traefik_aws_https_port }}"
+      - "{{ traefik_aws_dashboard_port }}:{{ traefik_aws_dashboard_port }}"
+    
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - {{ traefik_aws_base_dir }}/acme.json:/letsencrypt/acme.json
+      - {{ traefik_aws_base_dir }}/config:/config:ro
+      - {{ traefik_aws_base_dir }}/logs:/logs
+    
+    env_file:
+      - .env
+    
+    networks:
+      - {{ traefik_aws_network_name }}
+    
+    labels:
+      - "traefik.enable=true"
+{% if traefik_aws_enable_dashboard %}
+      # Dashboard router
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`{{ traefik_aws_dashboard_host }}`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.tls=true"
+{% if traefik_aws_use_dns_challenge %}
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver={{ traefik_aws_cert_resolver }}"
+{% endif %}
+{% endif %}
+    
+    deploy:
+      resources:
+        limits:
+          memory: {{ traefik_aws_memory_limit }}
+        reservations:
+          memory: {{ traefik_aws_memory_reservation }}
+    
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  {{ traefik_aws_network_name }}:
+    name: {{ traefik_aws_network_name }}
+    driver: bridge

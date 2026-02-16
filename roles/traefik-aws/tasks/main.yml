@@ -1,0 +1,188 @@
+---
+# Traefik AWS Role Tasks
+# Deploys Traefik as reverse proxy on AWS hosts for HTTPS termination
+
+- name: Check if traefik_enabled
+  ansible.builtin.debug:
+    msg: "Traefik AWS deployment {{ 'enabled' if traefik_enabled | default(false) else 'skipped' }}"
+  tags: [traefik-aws, traefik]
+
+- name: Create Traefik directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ traefik_aws_base_dir }}"
+    - "{{ traefik_aws_base_dir }}/config"
+    - "{{ traefik_aws_base_dir }}/logs"
+  when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Create acme.json for Let's Encrypt certificates
+  ansible.builtin.file:
+    path: "{{ traefik_aws_base_dir }}/acme.json"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+  when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Check if Infisical CLI is installed
+  ansible.builtin.command: which infisical
+  register: infisical_check
+  changed_when: false
+  failed_when: false
+  tags: [traefik-aws, traefik]
+
+- name: Install Infisical CLI repository setup script
+  ansible.builtin.shell: |
+    curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash
+  args:
+    executable: /bin/bash
+    creates: /etc/apt/sources.list.d/infisical.list
+  when: 
+    - infisical_check.rc != 0
+    - traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Ensure Infisical is installed
+  ansible.builtin.apt:
+    name:
+      - infisical
+    state: present
+    update_cache: yes
+  become: yes
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+  when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Place Infisical service token file
+  ansible.builtin.copy:
+    dest: /root/.infisical-token
+    content: "{{ traefik_aws_infisical_token }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_use_dns_challenge
+    - traefik_aws_infisical_token is defined
+    - traefik_aws_infisical_token | length > 0
+  no_log: true
+  tags: [traefik-aws, traefik]
+
+- name: Fetch Cloudflare API token from Infisical
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get {{ traefik_aws_cf_secret_name }} \
+      --projectId {{ traefik_aws_infisical_project_id }} \
+      --env {{ traefik_aws_infisical_env }} \
+      --path {{ traefik_aws_infisical_path }} \
+      --plain
+  register: cf_token_result
+  changed_when: false
+  no_log: true
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_use_dns_challenge
+    - traefik_aws_infisical_token is defined
+    - traefik_aws_infisical_token | length > 0
+  tags: [traefik-aws, traefik]
+
+- name: Set Cloudflare token fact
+  ansible.builtin.set_fact:
+    traefik_aws_cf_api_token: "{{ cf_token_result.stdout | trim }}"
+  when:
+    - traefik_enabled | default(false)
+    - cf_token_result is defined
+    - cf_token_result.stdout is defined
+  no_log: true
+  tags: [traefik-aws, traefik]
+
+- name: Template Traefik environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ traefik_aws_base_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart traefik-aws
+  when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Template Traefik docker-compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ traefik_aws_base_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart traefik-aws
+  when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Template Traefik dynamic configuration
+  ansible.builtin.template:
+    src: dynamic.yml.j2
+    dest: "{{ traefik_aws_base_dir }}/config/dynamic.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart traefik-aws
+  when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Create Traefik Docker network
+  community.docker.docker_network:
+    name: "{{ traefik_aws_network_name }}"
+    state: present
+  when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Start Traefik with docker compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ traefik_aws_base_dir }}"
+    state: present
+    pull: always
+  register: traefik_compose
+  when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Wait for Traefik to be healthy
+  ansible.builtin.uri:
+    url: "http://localhost:{{ traefik_aws_dashboard_port }}/ping"
+    method: GET
+    status_code: 200
+  register: traefik_health
+  retries: 10
+  delay: 5
+  until: traefik_health.status == 200
+  when:
+    - traefik_enabled | default(false)
+    - traefik_compose is changed or traefik_compose is succeeded
+  tags: [traefik-aws, traefik]
+
+- name: Display Traefik status
+  ansible.builtin.debug:
+    msg:
+      - "╔════════════════════════════════════════════════════════════════╗"
+      - "║             Traefik Deployed Successfully!                     ║"
+      - "╚════════════════════════════════════════════════════════════════╝"
+      - ""
+      - "Dashboard: https://{{ traefik_aws_dashboard_host }}"
+      - "HTTP Port: {{ traefik_aws_http_port }}"
+      - "HTTPS Port: {{ traefik_aws_https_port }}"
+      - ""
+      - "Services on this host can use Traefik labels for HTTPS:"
+      - "  - traefik.enable=true"
+      - "  - traefik.http.routers.<name>.rule=Host(`<hostname>`)"
+      - "  - traefik.http.routers.<name>.tls.certresolver={{ traefik_aws_cert_resolver }}"
+  when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]

@@ -1,0 +1,25 @@
+---
+# Uptime Kuma Role - Default Variables
+
+# Enable/disable Uptime Kuma deployment
+uptime_kuma_enabled: false
+
+# Container configuration
+uptime_kuma_image: "louislam/uptime-kuma:1"
+uptime_kuma_container_name: "uptime-kuma"
+
+# Network configuration
+uptime_kuma_port: 3001
+uptime_kuma_network: "uptime-kuma-net"
+
+# Directory configuration
+uptime_kuma_base_dir: "/opt/uptime-kuma"
+
+# Environment
+uptime_kuma_timezone: "America/Toronto"
+uptime_kuma_env: "{{ env | default('dev') }}"
+uptime_kuma_base_domain: "{{ base_domain | default('thebozic.com') }}"
+
+# Resource limits (suitable for t2.micro)
+uptime_kuma_memory_limit: "256m"
+uptime_kuma_memory_reservation: "128m"

@@ -1,0 +1,8 @@
+---
+# Uptime Kuma Role - Handlers
+
+- name: Restart uptime-kuma
+  community.docker.docker_compose_v2:
+    project_src: "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}"
+    state: restarted
+  when: uptime_kuma_enabled | default(false)

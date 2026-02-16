@@ -157,7 +157,7 @@
 - name: Manage Cloudflare DNS records
   community.general.cloudflare_dns:
     api_token: "{{ cloudflare_api_token_secret }}"
-    zone: "{{ cloudflare_zone }}"
+    zone: "{{ item.zone | default(cloudflare_zone) }}"
     record: "{{ item.name }}"
     type: "{{ item.type }}"
     value: "{{ item.content }}"
