@@ -157,6 +157,40 @@
     dest: /opt/scripts/app-status.sh
     mode: '0755'
 
+# =============================================================================
+# Setup secret refresh service
+# =============================================================================
+
+- name: Create refresh-secrets script
+  ansible.builtin.template:
+    src: refresh-secrets.sh.j2
+    dest: /usr/local/bin/refresh-secrets.sh
+    mode: '0755'
+
+- name: Create refresh-secrets systemd service
+  ansible.builtin.template:
+    src: refresh-secrets.service.j2
+    dest: /etc/systemd/system/refresh-secrets.service
+    mode: '0644'
+  notify: reload systemd
+
+- name: Create refresh-secrets systemd timer
+  ansible.builtin.template:
+    src: refresh-secrets.timer.j2
+    dest: /etc/systemd/system/refresh-secrets.timer
+    mode: '0644'
+  notify: reload systemd
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Enable and start refresh-secrets timer
+  ansible.builtin.systemd:
+    name: refresh-secrets.timer
+    state: started
+    enabled: true
+
 - name: Display deployment summary
   ansible.builtin.debug:
     msg: |
@@ -169,7 +203,12 @@
       Restore enabled: {{ restore_enabled }}
       
       Management scripts:
-        - /opt/scripts/deploy-apps.sh   # Redeploy all apps
-        - /opt/scripts/app-status.sh    # Check app status
+        - /opt/scripts/deploy-apps.sh      # Redeploy all apps
+        - /opt/scripts/app-status.sh       # Check app status
+        - /usr/local/bin/refresh-secrets.sh  # Refresh secrets from Infisical
+      
+      Secret refresh:
+        - Timer: refresh-secrets.timer (runs hourly)
+        - Manual: refresh-secrets.sh [--force] [app-name]
       
       ════════════════════════════════════════════════════════════════
