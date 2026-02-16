@@ -63,7 +63,13 @@
 - name: "{{ app_name }} - Build Infisical secret paths"
   ansible.builtin.set_fact:
     app_infisical_path: "{{ app_config.secrets.infisical_path | default('') }}"
-    app_has_secrets: "{{ app_config.secrets is defined and app_config.secrets.infisical_path is defined and app_config.secrets.infisical_path is not none and app_config.secrets.infisical_path | string | length > 0 }}"
+    app_has_secrets: >-
+      {{ 
+        app_config.secrets is defined and 
+        app_config.secrets.infisical_path is defined and 
+        app_config.secrets.infisical_path is not none and 
+        (app_config.secrets.infisical_path | string | length > 0)
+      }}
 
 # =============================================================================
 # Export secrets from Infisical to .env file (if app has secrets configured)
@@ -86,7 +92,7 @@
   environment:
     INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
     INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
-  when: app_has_secrets | bool
+  when: app_has_secrets | default(false) | bool
   register: secret_export
   changed_when: secret_export.rc == 0
 
@@ -103,18 +109,21 @@
 
 - name: "{{ app_name }} - Merge base config and secrets into .env"
   ansible.builtin.shell: |
+    set -e
     # Start with base config
     cat "{{ homelab_apps_path }}/{{ app_name }}/.env.base" > "{{ homelab_apps_path }}/{{ app_name }}/.env"
     
     # Append secrets if they exist (secrets override base config)
-    if [[ -f "{{ homelab_apps_path }}/{{ app_name }}/.env.secrets" ]]; then
+    if [[ -f "{{ homelab_apps_path }}/{{ app_name }}/.env.secrets" && -s "{{ homelab_apps_path }}/{{ app_name }}/.env.secrets" ]]; then
       echo "" >> "{{ homelab_apps_path }}/{{ app_name }}/.env"
-      echo "# Secrets from Infisical ({{ app_infisical_path }})" >> "{{ homelab_apps_path }}/{{ app_name }}/.env"
+      echo "# Secrets from Infisical ({{ app_infisical_path | default('') }})" >> "{{ homelab_apps_path }}/{{ app_name }}/.env"
       cat "{{ homelab_apps_path }}/{{ app_name }}/.env.secrets" >> "{{ homelab_apps_path }}/{{ app_name }}/.env"
     fi
     
     # Secure permissions
     chmod 600 "{{ homelab_apps_path }}/{{ app_name }}/.env"
+  args:
+    executable: /bin/bash
   changed_when: true
 
 - name: "{{ app_name }} - Store secret metadata for refresh service"
