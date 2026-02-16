@@ -1,0 +1,98 @@
+---
+# Cloudflare Dynamic DNS Updater
+# Deploys a container to automatically update Cloudflare DNS records when public IP changes
+
+- name: Check if Cloudflare DDNS is enabled
+  ansible.builtin.debug:
+    msg: "Deploying Cloudflare DDNS updater for zone: {{ cloudflare_ddns_zone | default('thebozic.com') }}"
+  when: cloudflare_ddns_enabled | default(false) | bool
+
+- name: Ensure Infisical token file exists
+  ansible.builtin.stat:
+    path: /root/.infisical-token
+  register: infisical_token_stat
+  when: cloudflare_ddns_enabled | default(false) | bool
+
+- name: Fetch Cloudflare API token from Infisical
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get CLOUDFLARE_API_TOKEN \
+      --projectId {{ infisical_project_id }} \
+      --env {{ infisical_env_slug }} \
+      --path {{ cloudflare_ddns_infisical_path | default('/infrastructure/dns/cloudflare') }} \
+      --plain
+  register: cloudflare_ddns_token_result
+  changed_when: false
+  no_log: true
+  when: 
+    - cloudflare_ddns_enabled | default(false) | bool
+    - infisical_token_stat.stat.exists | default(false)
+
+- name: Set Cloudflare API token from Infisical
+  ansible.builtin.set_fact:
+    cloudflare_ddns_api_token: "{{ cloudflare_ddns_token_result.stdout }}"
+  when: 
+    - cloudflare_ddns_enabled | default(false) | bool
+    - cloudflare_ddns_token_result is defined
+    - cloudflare_ddns_token_result is not skipped
+    - cloudflare_ddns_token_result.rc == 0
+    - cloudflare_ddns_token_result.stdout | length > 0
+  no_log: true
+
+- name: Fail if Cloudflare API token not available
+  ansible.builtin.fail:
+    msg: |
+      Failed to retrieve CLOUDFLARE_API_TOKEN from Infisical!
+      
+      Please ensure the token exists at:
+      - Path: {{ cloudflare_ddns_infisical_path | default('/infrastructure/dns/cloudflare') }}
+      - Environment: {{ infisical_env_slug }}
+      - Secret name: CLOUDFLARE_API_TOKEN
+      
+      The token needs Zone:DNS:Edit permissions for the zone.
+  when:
+    - cloudflare_ddns_enabled | default(false) | bool
+    - cloudflare_ddns_api_token is not defined or cloudflare_ddns_api_token | length == 0
+
+- name: Ensure Cloudflare DDNS directory exists
+  ansible.builtin.file:
+    path: /opt/cloudflare-ddns
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  when: cloudflare_ddns_enabled | default(false) | bool
+
+- name: Deploy Cloudflare DDNS docker-compose file
+  ansible.builtin.template:
+    src: cloudflare-ddns-compose.yml.j2
+    dest: /opt/cloudflare-ddns/docker-compose.yml
+    mode: '0600'  # Contains API token
+    owner: root
+    group: root
+  when: cloudflare_ddns_enabled | default(false) | bool
+  notify: restart cloudflare-ddns
+
+- name: Pull Cloudflare DDNS Docker image
+  community.docker.docker_image:
+    name: oznu/cloudflare-ddns
+    tag: latest
+    source: pull
+  when: cloudflare_ddns_enabled | default(false) | bool
+
+- name: Start Cloudflare DDNS container
+  community.docker.docker_compose_v2:
+    project_src: /opt/cloudflare-ddns
+    state: present
+  when: cloudflare_ddns_enabled | default(false) | bool
+  register: cloudflare_ddns_container
+
+- name: Display Cloudflare DDNS container status
+  ansible.builtin.debug:
+    msg:
+      - "Cloudflare DDNS container deployed successfully!"
+      - "Zone: {{ cloudflare_ddns_zone | default('thebozic.com') }}"
+      - "Subdomains: {{ cloudflare_ddns_subdomains | default('(root domain)') }}"
+      - "Proxied: {{ cloudflare_ddns_proxied | default(false) }}"
+      - "Container started: {{ cloudflare_ddns_container.changed | default(false) }}"
+  when: cloudflare_ddns_enabled | default(false) | bool

@@ -40,3 +40,8 @@
     cd /opt/stacks/glances
     docker compose down && docker compose up -d
   changed_when: true  # Handler always implies a change triggered it
+
+- name: restart cloudflare-ddns
+  community.docker.docker_compose_v2:
+    project_src: /opt/cloudflare-ddns
+    state: restarted

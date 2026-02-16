@@ -313,6 +313,11 @@
   when: router_enable_glances | default(true) | bool
   tags: [glances, monitoring]
 
+- name: Configure Cloudflare Dynamic DNS
+  ansible.builtin.import_tasks: cloudflare-ddns.yml
+  when: cloudflare_ddns_enabled | default(false) | bool
+  tags: [cloudflare-ddns, dns, ddns]
+
 - name: Include Tailscale VPN role
   ansible.builtin.include_role:
     name: tailscale

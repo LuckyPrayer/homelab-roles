@@ -1,0 +1,52 @@
+# Cloudflare Dynamic DNS Updater
+# Automatically updates Cloudflare DNS records when public IP changes
+# Image: oznu/cloudflare-ddns
+# https://github.com/oznu/docker-cloudflare-ddns
+
+services:
+  cloudflare-ddns:
+    container_name: cloudflare-ddns
+    image: oznu/cloudflare-ddns:latest
+    restart: unless-stopped
+    environment:
+      # API Token with Zone:DNS:Edit permissions for the zone
+      API_KEY: "{{ cloudflare_ddns_api_token }}"
+      # Zone (domain) to update
+      ZONE: "{{ cloudflare_ddns_zone | default('thebozic.com') }}"
+      # Subdomains to update (comma-separated for multiple)
+      SUBDOMAIN: "{{ cloudflare_ddns_subdomains | default('') }}"
+      # Use Cloudflare proxy (orange cloud)
+      PROXIED: "{{ cloudflare_ddns_proxied | default('false') | string | lower }}"
+      # Update interval in minutes (default: 5)
+      RRTYPE: "{{ cloudflare_ddns_record_type | default('A') }}"
+      # Delete record if IP cannot be determined
+      DELETE_ON_STOP: "{{ cloudflare_ddns_delete_on_stop | default('false') | string | lower }}"
+      # Container timezone
+      TZ: "{{ pihole_timezone | default('America/Toronto') }}"
+{% if cloudflare_ddns_interface is defined %}
+      # Use specific interface for IP detection
+      INTERFACE: "{{ cloudflare_ddns_interface }}"
+{% endif %}
+{% if cloudflare_ddns_custom_lookup_cmd is defined %}
+      # Custom command to lookup IP (advanced)
+      CUSTOM_LOOKUP_CMD: "{{ cloudflare_ddns_custom_lookup_cmd }}"
+{% endif %}
+    # No persistent storage needed - stateless container
+    # No ports needed - outbound only
+    networks:
+      - cloudflare-ddns_net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "https://1.1.1.1/cdn-cgi/trace"]
+      interval: 300s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  cloudflare-ddns_net:
+    driver: bridge
