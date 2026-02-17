@@ -1,0 +1,53 @@
+# Docker Socket Proxy
+# Provides secure, read-only Docker API access for monitoring tools
+# https://github.com/Tecnativa/docker-socket-proxy
+
+services:
+  docker-socket-proxy:
+    image: {{ docker_socket_proxy_image }}
+    container_name: {{ docker_socket_proxy_container_name }}
+    restart: unless-stopped
+    privileged: true
+    environment:
+      # Info endpoints (read-only)
+      - CONTAINERS={{ docker_socket_proxy_permissions.containers | default(1) }}
+      - IMAGES={{ docker_socket_proxy_permissions.images | default(1) }}
+      - NETWORKS={{ docker_socket_proxy_permissions.networks | default(1) }}
+      - VOLUMES={{ docker_socket_proxy_permissions.volumes | default(1) }}
+      - INFO={{ docker_socket_proxy_permissions.info | default(1) }}
+      - VERSION={{ docker_socket_proxy_permissions.version | default(1) }}
+      - PING={{ docker_socket_proxy_permissions.ping | default(1) }}
+      - EVENTS={{ docker_socket_proxy_permissions.events | default(1) }}
+      
+      # Dangerous endpoints (disabled)
+      - POST={{ docker_socket_proxy_permissions.post | default(0) }}
+      - BUILD={{ docker_socket_proxy_permissions.build | default(0) }}
+      - COMMIT={{ docker_socket_proxy_permissions.commit | default(0) }}
+      - CONFIGS={{ docker_socket_proxy_permissions.configs | default(0) }}
+      - DISTRIBUTION={{ docker_socket_proxy_permissions.distribution | default(0) }}
+      - EXEC={{ docker_socket_proxy_permissions.exec | default(0) }}
+      - GRPC={{ docker_socket_proxy_permissions.grpc | default(0) }}
+      - NODES={{ docker_socket_proxy_permissions.nodes | default(0) }}
+      - PLUGINS={{ docker_socket_proxy_permissions.plugins | default(0) }}
+      - SECRETS={{ docker_socket_proxy_permissions.secrets | default(0) }}
+      - SERVICES={{ docker_socket_proxy_permissions.services | default(0) }}
+      - SESSION={{ docker_socket_proxy_permissions.session | default(0) }}
+      - SWARM={{ docker_socket_proxy_permissions.swarm | default(0) }}
+      - SYSTEM={{ docker_socket_proxy_permissions.system | default(0) }}
+      - TASKS={{ docker_socket_proxy_permissions.tasks | default(0) }}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "{{ docker_socket_proxy_port }}:2375"
+    networks:
+      - {{ docker_socket_proxy_network }}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2375/_ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  {{ docker_socket_proxy_network }}:
+    external: true

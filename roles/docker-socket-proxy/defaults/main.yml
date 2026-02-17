@@ -1,0 +1,47 @@
+---
+# Docker Socket Proxy Role - Default Variables
+# Provides secure, read-only Docker API access for monitoring tools like Uptime Kuma
+
+# Enable/disable deployment
+docker_socket_proxy_enabled: false
+
+# Container configuration
+docker_socket_proxy_image: "tecnativa/docker-socket-proxy:latest"
+docker_socket_proxy_container_name: "docker-socket-proxy"
+
+# Network configuration
+docker_socket_proxy_port: 2375
+docker_socket_proxy_network: "homelab-network"
+
+# Directory configuration
+docker_socket_proxy_base_dir: "/opt/docker-socket-proxy"
+
+# API permissions (read-only by default for security)
+# Set to 1 to enable, 0 to disable
+docker_socket_proxy_permissions:
+  # Info endpoints (safe, read-only)
+  containers: 1    # List/inspect containers
+  images: 1        # List/inspect images
+  networks: 1      # List/inspect networks
+  volumes: 1       # List/inspect volumes
+  info: 1          # Docker info
+  version: 1       # Docker version
+  ping: 1          # Docker ping
+  events: 1        # Docker events (for real-time monitoring)
+  
+  # Dangerous endpoints (disabled by default)
+  post: 0          # Disable all POST requests
+  build: 0         # Disable image builds
+  commit: 0        # Disable container commits
+  configs: 0       # Disable config management
+  distribution: 0  # Disable image distribution
+  exec: 0          # Disable exec into containers
+  grpc: 0          # Disable gRPC
+  nodes: 0         # Disable swarm nodes
+  plugins: 0       # Disable plugin management
+  secrets: 0       # Disable secrets management
+  services: 0      # Disable swarm services
+  session: 0       # Disable sessions
+  swarm: 0         # Disable swarm management
+  system: 0        # Disable system management
+  tasks: 0         # Disable swarm tasks

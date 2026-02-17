@@ -1,0 +1,62 @@
+---
+# Docker Socket Proxy Role - Main Tasks
+# Deploys a secure Docker socket proxy for monitoring tools
+
+- name: Check if Docker Socket Proxy is enabled
+  ansible.builtin.debug:
+    msg: "Docker Socket Proxy deployment {{ 'enabled' if docker_socket_proxy_enabled else 'disabled' }}"
+
+- name: Deploy Docker Socket Proxy
+  when: docker_socket_proxy_enabled | bool
+  block:
+    - name: Create Docker Socket Proxy directories
+      ansible.builtin.file:
+        path: "{{ docker_socket_proxy_base_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Ensure Docker network exists
+      community.docker.docker_network:
+        name: "{{ docker_socket_proxy_network }}"
+        state: present
+
+    - name: Deploy Docker Socket Proxy docker-compose
+      ansible.builtin.template:
+        src: docker-compose.yml.j2
+        dest: "{{ docker_socket_proxy_base_dir }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Start Docker Socket Proxy
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_socket_proxy_base_dir }}"
+        state: present
+        pull: always
+      register: docker_socket_proxy_result
+
+    - name: Wait for Docker Socket Proxy to be healthy
+      ansible.builtin.uri:
+        url: "http://localhost:{{ docker_socket_proxy_port }}/_ping"
+        method: GET
+        status_code: [200]
+      register: health_check
+      until: health_check.status == 200
+      retries: 10
+      delay: 3
+
+    - name: Display Docker Socket Proxy info
+      ansible.builtin.debug:
+        msg:
+          - "╔════════════════════════════════════════════════════════════════╗"
+          - "║         Docker Socket Proxy Deployed Successfully!            ║"
+          - "╚════════════════════════════════════════════════════════════════╝"
+          - ""
+          - "Proxy URL: tcp://{{ ansible_host }}:{{ docker_socket_proxy_port }}"
+          - ""
+          - "For Uptime Kuma Docker Host setup:"
+          - "  Name: {{ inventory_hostname }}"
+          - "  Connection Type: TCP"
+          - "  Docker Host: tcp://{{ ansible_host }}:{{ docker_socket_proxy_port }}"
