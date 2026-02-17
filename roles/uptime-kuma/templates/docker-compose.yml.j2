@@ -22,7 +22,10 @@ services:
     cap_drop:
       - ALL
     cap_add:
-      - NET_RAW  # Required for ping monitoring
+      - CHOWN     # Required for data directory ownership
+      - SETUID    # Required for startup user switching
+      - SETGID    # Required for startup group switching
+      - NET_RAW   # Required for ping monitoring
 {% if uptime_kuma_memory_limit is defined %}
     deploy:
       resources:
