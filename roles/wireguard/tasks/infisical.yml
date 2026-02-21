@@ -1,0 +1,149 @@
+---
+# Fetch WireGuard keys from Infisical
+
+- name: Check if Infisical CLI is installed
+  ansible.builtin.command: which infisical
+  register: infisical_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Infisical CLI if not present
+  when: infisical_check.rc != 0
+  block:
+    - name: Install Infisical CLI repository setup script
+      ansible.builtin.shell: |
+        curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash
+      args:
+        executable: /bin/bash
+        creates: /etc/apt/sources.list.d/infisical.list
+
+    - name: Install Infisical CLI
+      ansible.builtin.apt:
+        name: infisical
+        state: present
+        update_cache: yes
+      register: apt_result
+      retries: 5
+      delay: 30
+      until: apt_result is succeeded
+
+- name: Place Infisical service token file
+  ansible.builtin.copy:
+    dest: /root/.infisical-token
+    content: "{{ infisical_service_token }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+  when:
+    - infisical_service_token is defined
+    - infisical_service_token | length > 0
+  no_log: true
+
+# Server mode: fetch server private key
+- name: Fetch WireGuard server private key from Infisical
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get {{ wireguard_infisical_server_private_key }} \
+      --projectId {{ infisical_project_id }} \
+      --env {{ wireguard_infisical_env }} \
+      --path {{ wireguard_infisical_path }} \
+      --plain
+  register: wg_server_private_key_result
+  changed_when: false
+  no_log: true
+  when:
+    - wireguard_mode == 'server'
+    - wireguard_server_private_key | length == 0
+
+- name: Set server private key fact
+  ansible.builtin.set_fact:
+    wireguard_server_private_key: "{{ wg_server_private_key_result.stdout | trim }}"
+  when:
+    - wireguard_mode == 'server'
+    - wg_server_private_key_result is defined
+    - wg_server_private_key_result.stdout is defined
+  no_log: true
+
+# Client mode: fetch client private key and server public key
+- name: Fetch WireGuard client private key from Infisical
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get {{ wireguard_infisical_client_private_key }} \
+      --projectId {{ infisical_project_id }} \
+      --env {{ wireguard_infisical_env }} \
+      --path {{ wireguard_infisical_path }} \
+      --plain
+  register: wg_client_private_key_result
+  changed_when: false
+  no_log: true
+  when:
+    - wireguard_mode == 'client'
+    - wireguard_client_private_key | length == 0
+
+- name: Set client private key fact
+  ansible.builtin.set_fact:
+    wireguard_client_private_key: "{{ wg_client_private_key_result.stdout | trim }}"
+  when:
+    - wireguard_mode == 'client'
+    - wg_client_private_key_result is defined
+    - wg_client_private_key_result.stdout is defined
+  no_log: true
+
+- name: Fetch WireGuard server public key from Infisical
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get {{ wireguard_infisical_server_public_key }} \
+      --projectId {{ infisical_project_id }} \
+      --env {{ wireguard_infisical_env }} \
+      --path {{ wireguard_infisical_path }} \
+      --plain
+  register: wg_server_public_key_result
+  changed_when: false
+  no_log: true
+  when:
+    - wireguard_mode == 'client'
+    - wireguard_server_public_key | length == 0
+
+- name: Set server public key fact for client
+  ansible.builtin.set_fact:
+    wireguard_server_public_key: "{{ wg_server_public_key_result.stdout | trim }}"
+  when:
+    - wireguard_mode == 'client'
+    - wg_server_public_key_result is defined
+    - wg_server_public_key_result.stdout is defined
+  no_log: true
+
+# Server mode: fetch client public key to populate wireguard_clients
+- name: Fetch WireGuard client public key from Infisical (for server config)
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get {{ wireguard_infisical_client_public_key }} \
+      --projectId {{ infisical_project_id }} \
+      --env {{ wireguard_infisical_env }} \
+      --path {{ wireguard_infisical_path }} \
+      --plain
+  register: wg_client_public_key_result
+  changed_when: false
+  no_log: true
+  when:
+    - wireguard_mode == 'server'
+    - wireguard_clients | selectattr('public_key', 'equalto', '') | list | length > 0
+
+- name: Update wireguard_clients with fetched client public key
+  ansible.builtin.set_fact:
+    wireguard_clients: >-
+      {%- set updated = [] -%}
+      {%- for client in wireguard_clients -%}
+        {%- if client.public_key | default('') | length == 0 -%}
+          {%- set _ = updated.append(client | combine({'public_key': wg_client_public_key_result.stdout | trim})) -%}
+        {%- else -%}
+          {%- set _ = updated.append(client) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ updated }}
+  when:
+    - wireguard_mode == 'server'
+    - wg_client_public_key_result is defined
+    - wg_client_public_key_result.stdout is defined
+    - wg_client_public_key_result.stdout | trim | length > 0
+  no_log: true

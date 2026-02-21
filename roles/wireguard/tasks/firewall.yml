@@ -1,0 +1,101 @@
+---
+# WireGuard Firewall Configuration Tasks
+
+- name: Allow WireGuard UDP traffic
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: udp
+    destination_port: "{{ wireguard_port }}"
+    jump: ACCEPT
+    comment: "WireGuard UDP port"
+  when: wireguard_mode == 'server'
+  notify: save iptables
+
+- name: Allow traffic on WireGuard interface
+  ansible.builtin.iptables:
+    chain: INPUT
+    in_interface: "{{ wireguard_interface }}"
+    jump: ACCEPT
+    comment: "Allow WireGuard interface input"
+  notify: save iptables
+
+- name: Allow forwarding from WireGuard interface
+  ansible.builtin.iptables:
+    chain: FORWARD
+    in_interface: "{{ wireguard_interface }}"
+    jump: ACCEPT
+    comment: "Allow forwarding from WireGuard"
+  when: wireguard_allow_forwarding | default(true) | bool
+  notify: save iptables
+
+- name: Allow forwarding to WireGuard interface
+  ansible.builtin.iptables:
+    chain: FORWARD
+    out_interface: "{{ wireguard_interface }}"
+    jump: ACCEPT
+    comment: "Allow forwarding to WireGuard"
+  when: wireguard_allow_forwarding | default(true) | bool
+  notify: save iptables
+
+# Server-specific firewall rules for port forwarding
+- name: Configure port forwarding rules (PREROUTING)
+  ansible.builtin.iptables:
+    table: nat
+    chain: PREROUTING
+    protocol: "{{ item.protocol }}"
+    destination_port: "{{ item.external_port }}"
+    jump: DNAT
+    to_destination: "{{ item.internal_ip }}:{{ item.internal_port }}"
+    comment: "WireGuard forward: {{ item.name }}"
+  loop: "{{ wireguard_port_forwards | default([]) }}"
+  when:
+    - wireguard_mode == 'server'
+    - wireguard_port_forwards is defined
+    - wireguard_port_forwards | length > 0
+  notify: save iptables
+
+- name: Configure port forwarding rules (POSTROUTING masquerade)
+  ansible.builtin.iptables:
+    table: nat
+    chain: POSTROUTING
+    out_interface: "{{ wireguard_interface }}"
+    jump: MASQUERADE
+    comment: "WireGuard NAT for tunnel traffic"
+  when: wireguard_mode == 'server'
+  notify: save iptables
+
+# Allow related/established connections
+- name: Allow established and related connections
+  ansible.builtin.iptables:
+    chain: INPUT
+    match: conntrack
+    ctstate: ESTABLISHED,RELATED
+    jump: ACCEPT
+    comment: "Allow established/related"
+  notify: save iptables
+
+- name: Allow established and related forward connections
+  ansible.builtin.iptables:
+    chain: FORWARD
+    match: conntrack
+    ctstate: ESTABLISHED,RELATED
+    jump: ACCEPT
+    comment: "Allow established/related forward"
+  when: wireguard_allow_forwarding | default(true) | bool
+  notify: save iptables
+
+# Ensure iptables rules persist across reboots
+- name: Ensure iptables directory exists
+  ansible.builtin.file:
+    path: /etc/iptables
+    state: directory
+    mode: '0755'
+
+- name: Save iptables rules
+  ansible.builtin.shell: |
+    iptables-save > /etc/iptables/rules.v4
+    ip6tables-save > /etc/iptables/rules.v6 || true
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: wireguard_save_iptables | default(true) | bool

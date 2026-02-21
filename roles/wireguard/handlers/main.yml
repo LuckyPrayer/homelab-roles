@@ -1,0 +1,40 @@
+---
+# WireGuard Role Handlers
+
+- name: Restart WireGuard
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ wireguard_interface }}"
+    state: restarted
+    daemon_reload: true
+  when: wireguard_enabled | default(false) | bool
+  listen: "restart wireguard"
+
+- name: Reload WireGuard config
+  ansible.builtin.shell: |
+    wg syncconf {{ wireguard_interface }} <(wg-quick strip {{ wireguard_config_dir }}/{{ wireguard_interface }}.conf)
+  args:
+    executable: /bin/bash
+  when: wireguard_enabled | default(false) | bool
+  listen: "reload wireguard"
+
+- name: Save iptables rules
+  ansible.builtin.shell: |
+    iptables-save > /etc/iptables/rules.v4 || true
+    ip6tables-save > /etc/iptables/rules.v6 || true
+  args:
+    executable: /bin/bash
+  when: wireguard_save_iptables | default(true) | bool
+  listen: "save iptables"
+
+- name: Restart netfilter-persistent
+  ansible.builtin.systemd:
+    name: netfilter-persistent
+    state: restarted
+  failed_when: false
+  listen: "restart netfilter"
+
+- name: Restart systemd-networkd
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    state: restarted
+  listen: "restart networkd"

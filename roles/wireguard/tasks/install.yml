@@ -1,0 +1,106 @@
+---
+# WireGuard Installation Tasks
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  retries: 3
+  delay: 10
+  register: apt_update_result
+  until: apt_update_result is succeeded
+
+- name: Install WireGuard packages
+  ansible.builtin.apt:
+    name:
+      - wireguard
+      - wireguard-tools
+    state: present
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Install additional network tools
+  ansible.builtin.apt:
+    name:
+      - iptables
+      - iptables-persistent
+    state: present
+  register: apt_result
+  retries: 5
+  delay: 30
+  until: apt_result is succeeded
+
+- name: Load WireGuard kernel module
+  community.general.modprobe:
+    name: wireguard
+    state: present
+
+- name: Ensure WireGuard module loads on boot
+  ansible.builtin.lineinfile:
+    path: /etc/modules-load.d/wireguard.conf
+    line: wireguard
+    create: yes
+    mode: '0644'
+
+- name: Create WireGuard configuration directory
+  ansible.builtin.file:
+    path: "{{ wireguard_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+# Configure an additional network interface for WireGuard ingress
+# Used when the WireGuard server needs a separate interface (e.g., management network)
+# to receive tunnel connections, simulating a public-facing IP
+- name: Configure WireGuard ingress interface
+  when:
+    - wireguard_mgmt_interface is defined
+    - wireguard_mgmt_ip is defined
+  block:
+    - name: Create systemd-networkd config for WireGuard ingress interface
+      ansible.builtin.copy:
+        content: |
+          [Match]
+          Name={{ wireguard_mgmt_interface }}
+
+          [Network]
+          Address={{ wireguard_mgmt_ip }}/{{ wireguard_mgmt_prefix | default(24) }}
+          {% if wireguard_mgmt_gateway is defined %}
+          Gateway={{ wireguard_mgmt_gateway }}
+          {% endif %}
+        dest: "/etc/systemd/network/20-{{ wireguard_mgmt_interface }}.network"
+        mode: '0644'
+      notify: restart networkd
+
+    - name: Enable systemd-networkd
+      ansible.builtin.systemd:
+        name: systemd-networkd
+        enabled: yes
+        state: started
+
+    - name: Bring up ingress interface
+      ansible.builtin.command: ip link set {{ wireguard_mgmt_interface }} up
+      changed_when: false
+      failed_when: false
+
+- name: Enable IP forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    state: present
+    sysctl_set: yes
+    reload: yes
+  when: wireguard_allow_forwarding | default(true) | bool
+
+- name: Enable IP forwarding (IPv6)
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.all.forwarding
+    value: '1'
+    state: present
+    sysctl_set: yes
+    reload: yes
+  when: wireguard_allow_forwarding | default(true) | bool
+  failed_when: false

@@ -1,0 +1,44 @@
+---
+# WireGuard Server Configuration Tasks (pharos VPS)
+
+- name: Validate server configuration
+  ansible.builtin.assert:
+    that:
+      - wireguard_server_private_key | length > 0
+      - wireguard_server_address | length > 0
+    fail_msg: "Server private key and address must be configured"
+
+- name: Validate client public keys are populated
+  ansible.builtin.assert:
+    that:
+      - item.public_key | default('') | length > 0
+    fail_msg: "Client '{{ item.name }}' has no public key — ensure it is configured or fetched from Infisical"
+  loop: "{{ wireguard_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Generate WireGuard server configuration
+  ansible.builtin.template:
+    src: server.conf.j2
+    dest: "{{ wireguard_config_dir }}/{{ wireguard_interface }}.conf"
+    owner: root
+    group: root
+    mode: '0600'
+  notify: restart wireguard
+
+- name: Create clients directory for peer configs
+  ansible.builtin.file:
+    path: "{{ wireguard_config_dir }}/clients"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Display server configuration info
+  ansible.builtin.debug:
+    msg:
+      - "WireGuard Server Configuration:"
+      - "  Interface: {{ wireguard_interface }}"
+      - "  Address: {{ wireguard_server_address }}"
+      - "  Port: {{ wireguard_port }}"
+      - "  Clients configured: {{ wireguard_clients | length }}"

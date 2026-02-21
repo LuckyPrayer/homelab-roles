@@ -1,0 +1,30 @@
+---
+# WireGuard Client Configuration Tasks (hermes router)
+
+- name: Validate client configuration
+  ansible.builtin.assert:
+    that:
+      - wireguard_client_private_key | length > 0
+      - wireguard_client_address | length > 0
+      - wireguard_server_public_key | length > 0
+      - wireguard_server_endpoint | length > 0
+    fail_msg: "Client private key, address, server public key, and server endpoint must be configured"
+
+- name: Generate WireGuard client configuration
+  ansible.builtin.template:
+    src: client.conf.j2
+    dest: "{{ wireguard_config_dir }}/{{ wireguard_interface }}.conf"
+    owner: root
+    group: root
+    mode: '0600'
+  notify: restart wireguard
+
+- name: Display client configuration info
+  ansible.builtin.debug:
+    msg:
+      - "WireGuard Client Configuration:"
+      - "  Interface: {{ wireguard_interface }}"
+      - "  Address: {{ wireguard_client_address }}"
+      - "  Server Endpoint: {{ wireguard_server_endpoint }}"
+      - "  Keepalive: {{ wireguard_persistent_keepalive }}s"
+      - "  Advertised Routes: {{ wireguard_advertised_routes | default([]) | join(', ') }}"

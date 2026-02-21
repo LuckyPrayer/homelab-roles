@@ -1,0 +1,158 @@
+---
+# WireGuard Role Defaults
+# This role configures WireGuard VPN tunnels for bypassing home network port forwarding
+
+# Enable/disable WireGuard
+wireguard_enabled: false
+
+# Mode: 'server' (VPS endpoint) or 'client' (homelab router)
+wireguard_mode: "client"
+
+# WireGuard interface name
+wireguard_interface: "wg0"
+
+# WireGuard UDP port (should be open on server)
+wireguard_port: 51820
+
+# VPN network CIDR (internal tunnel network)
+# This is the network used for WireGuard peer communication
+wireguard_network: "10.200.200.0/24"
+
+# ============================================================
+# Server Mode Configuration (pharos VPS)
+# ============================================================
+
+# Server's WireGuard IP address
+wireguard_server_address: "10.200.200.1/24"
+
+# Server's private key (fetched from Infisical or provided directly)
+wireguard_server_private_key: ""
+
+# Server's public key (for clients to connect)
+wireguard_server_public_key: ""
+
+# Client peers to accept connections from
+# Each client needs: name, public_key, allowed_ips, and optionally preshared_key
+wireguard_clients: []
+# Example:
+#   - name: "hermes-dev"
+#     public_key: "CLIENT_PUBLIC_KEY_HERE"
+#     allowed_ips: "10.200.200.2/32,192.168.20.0/24"
+#     preshared_key: ""  # Optional additional security
+#   - name: "hermes-prod"
+#     public_key: "CLIENT_PUBLIC_KEY_HERE"
+#     allowed_ips: "10.200.200.3/32,192.168.10.0/24"
+
+# Port forwarding from VPS to homelab through tunnel
+# These rules forward traffic arriving at the VPS to internal services
+wireguard_port_forwards: []
+# Example:
+#   - name: "HTTP to Traefik"
+#     external_port: 80
+#     internal_ip: "192.168.10.1"
+#     internal_port: 80
+#     protocol: tcp
+#   - name: "HTTPS to Traefik"
+#     external_port: 443
+#     internal_ip: "192.168.10.1"
+#     internal_port: 443
+#     protocol: tcp
+
+# ============================================================
+# Client Mode Configuration (hermes router)
+# ============================================================
+
+# Client's WireGuard IP address
+wireguard_client_address: "10.200.200.2/24"
+
+# Client's private key (fetched from Infisical or provided directly)
+wireguard_client_private_key: ""
+
+# Client's public key (for server configuration)
+wireguard_client_public_key: ""
+
+# Server endpoint (public IP:port of the VPS)
+# Example: "54.89.199.29:51820"
+wireguard_server_endpoint: ""
+
+# Persistent keepalive interval (seconds)
+# Required when client is behind NAT/firewall to keep tunnel active
+# Set to 25 seconds for most home networks
+wireguard_persistent_keepalive: 25
+
+# Allowed IPs to route through the tunnel (from client perspective)
+# This determines what traffic the client sends through the tunnel
+wireguard_client_allowed_ips: "10.200.200.0/24"
+
+# Routes to advertise from client to server
+# These networks will be accessible through the tunnel
+wireguard_advertised_routes: []
+# Example for hermes-prod (production router):
+#   - "192.168.10.0/24"  # Production VLAN
+
+# ============================================================
+# Infisical Integration
+# ============================================================
+
+# Use Infisical to fetch WireGuard keys
+wireguard_use_infisical: true
+
+# Infisical secret path for WireGuard keys
+wireguard_infisical_path: "/infrastructure/vpn/wireguard"
+
+# Infisical environment (dev/prod)
+wireguard_infisical_env: "{{ infisical_env_slug | default('prod') }}"
+
+# Infisical secret names
+wireguard_infisical_server_private_key: "WG_SERVER_PRIVATE_KEY"
+wireguard_infisical_server_public_key: "WG_SERVER_PUBLIC_KEY"
+wireguard_infisical_client_private_key: "WG_CLIENT_PRIVATE_KEY"
+wireguard_infisical_client_public_key: "WG_CLIENT_PUBLIC_KEY"
+
+# ============================================================
+# Firewall Configuration
+# ============================================================
+
+# Configure firewall rules for WireGuard
+wireguard_configure_firewall: true
+
+# Allow forwarding between WireGuard and other interfaces
+wireguard_allow_forwarding: true
+
+# Save iptables rules persistently
+wireguard_save_iptables: true
+
+# ============================================================
+# Advanced Configuration
+# ============================================================
+
+# WireGuard configuration directory
+wireguard_config_dir: "/etc/wireguard"
+
+# Management/Ingress interface configuration (optional)
+# When set, the role configures a separate network interface for WireGuard to listen on
+# This is useful for VMs that need a second NIC on a different network for tunnel ingress
+# Example: pharos-dev gets a management network NIC so hermes-dev can reach it
+# wireguard_mgmt_interface: "ens19"    # The interface name of the additional NIC
+# wireguard_mgmt_ip: "192.168.68.150"  # Static IP for the ingress interface
+# wireguard_mgmt_prefix: 24            # Network prefix length
+# wireguard_mgmt_gateway: ""           # Optional gateway (usually not needed)
+
+# MTU for WireGuard interface (1420 is safe default)
+wireguard_mtu: 1420
+
+# DNS servers for the WireGuard interface (optional)
+# Usually not needed for site-to-site tunnels
+wireguard_dns: []
+
+# PostUp commands (run after interface comes up)
+wireguard_post_up: []
+
+# PostDown commands (run after interface goes down)
+wireguard_post_down: []
+
+# Enable automatic startup via systemd
+wireguard_autostart: true
+
+# Enable debug logging
+wireguard_debug: false

@@ -1,0 +1,61 @@
+---
+# WireGuard Role Main Tasks
+# This role configures WireGuard VPN tunnels
+
+- name: Skip WireGuard if not enabled
+  ansible.builtin.debug:
+    msg: "WireGuard is not enabled for {{ inventory_hostname }}. Set wireguard_enabled: true to enable."
+  when: not (wireguard_enabled | default(false) | bool)
+
+- name: Deploy WireGuard
+  when: wireguard_enabled | default(false) | bool
+  block:
+    - name: Display WireGuard deployment info
+      ansible.builtin.debug:
+        msg:
+          - "╔════════════════════════════════════════════════════════════════╗"
+          - "║           Deploying WireGuard ({{ wireguard_mode | upper }} MODE)             ║"
+          - "╚════════════════════════════════════════════════════════════════╝"
+          - "Host: {{ inventory_hostname }}"
+          - "Mode: {{ wireguard_mode }}"
+          - "Interface: {{ wireguard_interface }}"
+          - "Port: {{ wireguard_port }}"
+
+    - name: Include installation tasks
+      ansible.builtin.include_tasks: install.yml
+
+    - name: Include Infisical key fetch tasks
+      ansible.builtin.include_tasks: infisical.yml
+      when: wireguard_use_infisical | default(true) | bool
+
+    - name: Include server configuration tasks
+      ansible.builtin.include_tasks: server.yml
+      when: wireguard_mode == 'server'
+
+    - name: Include client configuration tasks
+      ansible.builtin.include_tasks: client.yml
+      when: wireguard_mode == 'client'
+
+    - name: Include firewall configuration tasks
+      ansible.builtin.include_tasks: firewall.yml
+      when: wireguard_configure_firewall | default(true) | bool
+
+    - name: Enable and start WireGuard service
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ wireguard_interface }}"
+        enabled: "{{ wireguard_autostart | default(true) }}"
+        state: started
+        daemon_reload: true
+      register: wg_service_result
+
+    - name: Verify WireGuard is running
+      ansible.builtin.command: wg show {{ wireguard_interface }}
+      register: wg_show
+      changed_when: false
+      failed_when: wg_show.rc != 0
+
+    - name: Display WireGuard status
+      ansible.builtin.debug:
+        msg:
+          - "WireGuard {{ wireguard_interface }} is active"
+          - "{{ wg_show.stdout_lines }}"
