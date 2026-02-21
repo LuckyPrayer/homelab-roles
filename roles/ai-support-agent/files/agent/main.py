@@ -31,7 +31,7 @@ INFRASTRUCTURE_CONTEXT = """
 ### Development Environment (VLAN 20: 192.168.20.0/24)
 | Host | IP | Services | Ports |
 |------|----|---------|-|
-| **hermes-dev** | 192.168.2.10 | Jump host, Traefik (external proxy) | SSH:22, HTTP:80, HTTPS:443, Traefik metrics:8082 |
+| **hermes-dev** | 192.168.68.10 | Jump host, Traefik (external proxy) | SSH:22, HTTP:80, HTTPS:443, Traefik metrics:8082 |
 | **orion-dev** | 192.168.20.100 | Traefik (local), Minecraft, Vaultwarden, N8N, Mealie | Traefik:8080, Minecraft:25565, Vaultwarden:8200, N8N:5678, Mealie:9000 |
 | **hephaestus-dev** | 192.168.20.200 | Harbor (registry), Documentation server, Discord Bot | Harbor:8082, Docs:8081, Bot webhook:8085 |
 | **argus-dev** | 192.168.20.50 | Grafana, Prometheus, Loki, Alertmanager, Oracle AI Agent | Grafana:3000, Prometheus:9090, Loki:3100, Alertmanager:9093 |
@@ -831,13 +831,13 @@ class OracleAgent(commands.Bot):
 1. **For status questions:** ALWAYS run live diagnostic commands first (docker ps, curl endpoints)
 2. **For configuration questions:** Search the codebase AND verify against the Infrastructure Map
 3. **Never guess service locations:** Use the host/port mapping in your system prompt
-4. **SSH to remote hosts:** Use `ssh -o ProxyJump=root@192.168.2.10 root@<target_ip> "<command>"` for VLAN 20 hosts
+4. **SSH to remote hosts:** Use `ssh -o ProxyJump=root@192.168.68.10 root@<target_ip> "<command>"` for VLAN 20 hosts
 5. **Verify before responding:** If unsure, run a command to check
 
 ## Example Verification Commands
-- Check container status: `ssh -o ProxyJump=root@192.168.2.10 root@192.168.20.200 "docker ps -a --filter name=homelab-docs"`
+- Check container status: `ssh -o ProxyJump=root@192.168.68.10 root@192.168.20.200 "docker ps -a --filter name=homelab-docs"`
 - Check service health: `curl -s http://192.168.20.200:8081/ -o /dev/null -w '%{{http_code}}'`
-- Check logs: `ssh -o ProxyJump=root@192.168.2.10 root@<host> "docker logs <container> --tail 20"`
+- Check logs: `ssh -o ProxyJump=root@192.168.68.10 root@<host> "docker logs <container> --tail 20"`
 
 Respond directly and accurately to the user's question.
 """

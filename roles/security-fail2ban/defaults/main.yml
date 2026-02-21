@@ -9,8 +9,8 @@ fail2ban_enabled: true
 # ============================================================================
 
 # IPs/networks to never ban (space-separated)
-# Management VLAN (192.168.2.0/24) is always whitelisted
-fail2ban_ignoreip: "127.0.0.1/8 ::1 192.168.2.0/24"
+# Management VLAN (192.168.68.0/24) is always whitelisted
+fail2ban_ignoreip: "127.0.0.1/8 ::1 192.168.68.0/24"
 
 # Default ban duration (use time abbreviation: s, m, h, d, w)
 fail2ban_bantime: "1h"

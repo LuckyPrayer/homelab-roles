@@ -177,7 +177,7 @@ services:
 ```
 Internet/LAN
      ↓
-[hermes-dev] 192.168.2.10
+[hermes-dev] 192.168.68.10
 Traefik Proxy + HTTPS
      ↓
 harbor.dev.thebozic.com
@@ -252,7 +252,7 @@ traefik_proxy_backends:
 ```yaml
 dns_records:
   - hostname: "harbor.dev.thebozic.com"
-    ip: "192.168.2.10"
+    ip: "192.168.68.10"
     description: "Harbor container registry"
 ```
 
@@ -339,11 +339,11 @@ infisical secrets list \
 ssh root@192.168.20.100 'docker ps | grep harbor'
 
 # Check Traefik proxy
-ssh root@192.168.2.10 'docker logs traefik-proxy | grep harbor'
+ssh root@192.168.68.10 'docker logs traefik-proxy | grep harbor'
 
 # Verify DNS
 nslookup harbor.dev.thebozic.com
-# Should return: 192.168.2.10
+# Should return: 192.168.68.10
 ```
 
 ### Cannot Login

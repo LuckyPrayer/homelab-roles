@@ -151,7 +151,7 @@ Add DNS record in `inventories/dev/group_vars/all.yml`:
 ```yaml
 dns_records:
   - hostname: "harbor.dev.thebozic.com"
-    ip: "192.168.2.10"
+    ip: "192.168.68.10"
     description: "Harbor container registry (proxied to orion-dev)"
 ```
 

@@ -80,7 +80,7 @@ After the runner is installed, verify it appears in GitHub:
 
 ```bash
 # SSH to the host
-ssh -J root@192.168.2.10 root@192.168.20.200
+ssh -J root@192.168.68.10 root@192.168.20.200
 
 # Check service status
 systemctl status actions.runner.*

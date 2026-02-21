@@ -16,7 +16,7 @@ tailscale_advertise_routes: []
 # Example:
 #   - "192.168.10.0/24"  # Production VLAN
 #   - "192.168.20.0/24"  # Development VLAN
-#   - "192.168.2.0/24"   # Management network
+#   - "192.168.68.0/24"   # Management network
 
 # Accept routes advertised by other Tailscale nodes
 tailscale_accept_routes: true

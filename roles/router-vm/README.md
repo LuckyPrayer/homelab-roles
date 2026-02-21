@@ -38,7 +38,7 @@ vm_ip: null  # Primary management IP
 vm_bridge: vmbr0
 vm_vlan: null  # Management VLAN
 vm_net_prefix: 24
-vm_net_gateway: 192.168.2.1
+vm_net_gateway: 192.168.68.1
 
 # Proxmox settings
 proxmox_node: proxmoxve
@@ -115,7 +115,7 @@ router_dns_listen_interfaces:
 # Static Routes
 router_static_routes:
   - network: 10.0.0.0/8
-    gateway: 192.168.2.1
+    gateway: 192.168.68.1
     interface: eth0
 ```
 
@@ -132,9 +132,9 @@ routers:
   hosts:
     router-dev:
       ansible_user: ansible
-      ansible_host: 192.168.2.10
+      ansible_host: 192.168.68.10
       env: dev
-      vm_ip: 192.168.2.10
+      vm_ip: 192.168.68.10
       vm_vlan: 2
       router_enable_ip_forwarding: true
       router_interfaces:
@@ -189,7 +189,7 @@ This role is designed to work with a VLAN-based network architecture:
             │                │                │
        VLAN 2           VLAN 10          VLAN 20
     (Management)      (Production)        (Dev)
-    192.168.2.0/24   192.168.10.0/24   192.168.20.0/24
+    192.168.68.0/24   192.168.10.0/24   192.168.20.0/24
             │                │                │
             │                │                │
       ┌─────┴─────┐    ┌────┴────┐     ┌────┴────┐
@@ -290,7 +290,7 @@ Example DNS records file structure:
 # Development Environment DNS Records
 dns_records:
   - hostname: "hermes-dev"
-    ip: "192.168.2.10"
+    ip: "192.168.68.10"
     description: "Dev environment router and DNS server"
   
   - hostname: "orion-dev"

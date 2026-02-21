@@ -12,9 +12,9 @@ proxmox_bridge_interface: ""  # Leave empty for auto-detection
 
 # Network configuration for the Proxmox host
 # These are typically set per-host in inventory
-proxmox_host_ip: ""  # e.g., 192.168.2.236
+proxmox_host_ip: ""  # e.g., 192.168.68.236
 proxmox_host_netmask: "24"
-proxmox_host_gateway: "192.168.2.1"
+proxmox_host_gateway: "192.168.68.1"
 
 # Bridge options
 proxmox_bridge_stp: "off"
@@ -32,8 +32,8 @@ restart_networking: false  # Set to true only if you're confident
 # proxmox_bridges:
 #   - name: vmbr0
 #     type: static
-#     address: 192.168.2.236/24
-#     gateway: 192.168.2.1
+#     address: 192.168.68.236/24
+#     gateway: 192.168.68.1
 #     ports: eno1
 #     vlan_aware: true
 #     vlan_range: "2-4094"

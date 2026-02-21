@@ -89,7 +89,7 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "expr": "up{job=\"node\", instance=\"192.168.2.10:9100\"}",
+          "expr": "up{job=\"node\", instance=\"192.168.68.10:9100\"}",
           "legendFormat": "Hermes (Router)",
           "refId": "A"
         }
@@ -502,7 +502,7 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.2.10:9100\"}[5m])) * 100)",
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\", instance=\"192.168.68.10:9100\"}[5m])) * 100)",
           "legendFormat": "CPU",
           "refId": "A"
         }
@@ -567,7 +567,7 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "expr": "(1 - (node_memory_MemAvailable_bytes{instance=\"192.168.2.10:9100\"} / node_memory_MemTotal_bytes{instance=\"192.168.2.10:9100\"})) * 100",
+          "expr": "(1 - (node_memory_MemAvailable_bytes{instance=\"192.168.68.10:9100\"} / node_memory_MemTotal_bytes{instance=\"192.168.68.10:9100\"})) * 100",
           "legendFormat": "Memory",
           "refId": "A"
         }
@@ -654,12 +654,12 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "expr": "rate(node_network_receive_bytes_total{instance=\"192.168.2.10:9100\", device!~\"lo|veth.*|docker.*|br-.*\"}[5m]) * 8",
+          "expr": "rate(node_network_receive_bytes_total{instance=\"192.168.68.10:9100\", device!~\"lo|veth.*|docker.*|br-.*\"}[5m]) * 8",
           "legendFormat": "RX {{device}}",
           "refId": "A"
         },
         {
-          "expr": "rate(node_network_transmit_bytes_total{instance=\"192.168.2.10:9100\", device!~\"lo|veth.*|docker.*|br-.*\"}[5m]) * 8",
+          "expr": "rate(node_network_transmit_bytes_total{instance=\"192.168.68.10:9100\", device!~\"lo|veth.*|docker.*|br-.*\"}[5m]) * 8",
           "legendFormat": "TX {{device}}",
           "refId": "B"
         }

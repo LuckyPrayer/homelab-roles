@@ -24,7 +24,7 @@ Installs and configures fail2ban for intrusion prevention across all homelab hos
 fail2ban_enabled: true
 
 # Global settings
-fail2ban_ignoreip: "127.0.0.1/8 ::1 192.168.2.0/24"  # Management VLAN always whitelisted
+fail2ban_ignoreip: "127.0.0.1/8 ::1 192.168.68.0/24"  # Management VLAN always whitelisted
 fail2ban_bantime: "1h"
 fail2ban_findtime: "10m"
 fail2ban_maxretry: 5

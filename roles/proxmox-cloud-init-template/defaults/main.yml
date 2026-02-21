@@ -11,7 +11,7 @@ proxmox_bridge: "vmbr0"
 
 # Default VM network settings
 vm_net_prefix: 24
-vm_net_gateway: "192.168.2.236"
+vm_net_gateway: "192.168.68.236"
 
 # Default snippet storage for cloud-init drive (must be a directory-type storage like 'local')
 proxmox_snippet_storage: "local-lvm"

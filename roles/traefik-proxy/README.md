@@ -5,7 +5,7 @@ This Ansible role deploys Traefik as a reverse proxy on router VMs (e.g., hermes
 ## Use Case
 
 In a multi-VLAN homelab environment:
-- **hermes-dev** runs on management VLAN (192.168.2.0/24)
+- **hermes-dev** runs on management VLAN (192.168.68.0/24)
 - **orion-dev** runs Docker services on development VLAN (192.168.20.0/24)
 - Users on the management network need to access services on orion-dev
 
@@ -14,9 +14,9 @@ This role deploys Traefik on hermes-dev to proxy HTTPS traffic to backend servic
 ## Architecture
 
 ```
-Management Network (192.168.2.0/24)
+Management Network (192.168.68.0/24)
     │
-    └─ hermes-dev (192.168.2.10)
+    └─ hermes-dev (192.168.68.10)
        ├─ Traefik Proxy :80/:443
        │  ├─ n8n.dev.thebozic.com → http://192.168.20.100:5678
        │  ├─ mealie.dev.thebozic.com → http://192.168.20.100:9000
@@ -160,7 +160,7 @@ Check that Traefik is running:
 
 ```bash
 # SSH to hermes-dev
-ssh root@192.168.2.10
+ssh root@192.168.68.10
 
 # Check container status
 docker ps | grep traefik-proxy
@@ -269,7 +269,7 @@ iptables -L -v -n
 nslookup n8n.dev.thebozic.com
 dig n8n.dev.thebozic.com
 
-# Should resolve to 192.168.2.10 (hermes)
+# Should resolve to 192.168.68.10 (hermes)
 ```
 
 ## Security Considerations
@@ -291,7 +291,7 @@ The complete flow:
 1. `router-vm` sets up hermes-dev with networking
 2. `traefik-proxy` deploys the reverse proxy on hermes-dev
 3. `homelab-compose` deploys services on orion-dev
-4. DNS records point to hermes-dev (192.168.2.10)
+4. DNS records point to hermes-dev (192.168.68.10)
 5. Traefik proxies traffic to orion-dev backends
 
 ## License

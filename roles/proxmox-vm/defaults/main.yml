@@ -17,7 +17,7 @@ vm_onboot: true  # Start VM automatically when Proxmox host boots
 # Note: vm_vlan and vm_net_gateway should be set per environment in group_vars
 # - VLAN 10 (Production): 192.168.10.0/24, gateway 192.168.10.1
 # - VLAN 20 (Development): 192.168.20.0/24, gateway 192.168.20.1
-# - VLAN 2 (Management): 192.168.2.0/24, gateway 192.168.2.1
+# - VLAN 2 (Management): 192.168.68.0/24, gateway 192.168.68.1
 vm_bridge: vmbr0
 vm_vlan: null  # Set to VLAN ID (e.g., 10, 20) or null for no VLAN tag
 vm_net_prefix: 24

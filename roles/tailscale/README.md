@@ -62,7 +62,7 @@ tailscale_enabled: true
 tailscale_hostname: "hermes-prod"
 tailscale_advertise_routes:
   - "192.168.10.0/24"  # Production VLAN
-  - "192.168.2.0/24"   # Management network
+  - "192.168.68.0/24"   # Management network
 tailscale_accept_routes: true
 tailscale_exit_node: false
 tailscale_accept_dns: false  # Keep using Pi-hole
@@ -147,7 +147,7 @@ ssh root@100.x.x.x       # hermes-prod Tailscale IP
 
 # Access web services
 http://192.168.10.100:5678  # n8n
-http://192.168.2.11:8080    # Pi-hole
+http://192.168.68.11:8080    # Pi-hole
 ```
 
 ## Troubleshooting
@@ -181,7 +181,7 @@ ansible-playbook -i inventories/prod/hosts.yml playbooks/deploy-tailscale.yml \
 tailscale up --authkey=tskey-xxx --hostname=hermes-prod --advertise-routes=192.168.10.0/24
 
 # Update settings
-tailscale set --advertise-routes=192.168.10.0/24,192.168.2.0/24
+tailscale set --advertise-routes=192.168.10.0/24,192.168.68.0/24
 
 # Logout
 tailscale logout

@@ -4,7 +4,7 @@
 
 # VM configuration (inherits from proxmox-vm role)
 vm_name: "{{ inventory_hostname }}"
-vm_ip: null  # e.g., 192.168.2.10
+vm_ip: null  # e.g., 192.168.68.10
 
 # Template to clone from
 vm_template_name: "debian-13-generic-dev"  # Override in group_vars per environment
@@ -21,7 +21,7 @@ vm_override_disk: true
 vm_bridge: vmbr0
 vm_vlan: null  # Management VLAN (e.g., VLAN 2 for management)
 vm_net_prefix: 24
-vm_net_gateway: 192.168.2.1
+vm_net_gateway: 192.168.68.1
 
 # Additional network interfaces for routing between VLANs
 # These will be added via router-specific configuration
@@ -89,7 +89,7 @@ router_dns_listen_interfaces: []
 router_static_routes: []
   # Example:
   # - network: 10.0.0.0/8
-  #   gateway: 192.168.2.1
+  #   gateway: 192.168.68.1
   #   interface: eth0
 
 # VLANs to route between
