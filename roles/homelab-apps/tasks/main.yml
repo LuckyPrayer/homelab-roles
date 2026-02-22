@@ -158,6 +158,37 @@
     mode: '0755'
 
 # =============================================================================
+# Setup container audit (detect rogue/missing containers)
+# =============================================================================
+
+- name: Create audit-containers script
+  ansible.builtin.template:
+    src: audit-containers.sh.j2
+    dest: /opt/scripts/audit-containers.sh
+    mode: '0755'
+
+- name: Create audit-containers systemd service
+  ansible.builtin.template:
+    src: audit-containers.service.j2
+    dest: /etc/systemd/system/audit-containers.service
+    mode: '0644'
+  notify: reload systemd
+
+- name: Create audit-containers systemd timer
+  ansible.builtin.template:
+    src: audit-containers.timer.j2
+    dest: /etc/systemd/system/audit-containers.timer
+    mode: '0644'
+  notify: reload systemd
+
+- name: Enable and start audit-containers timer
+  ansible.builtin.systemd:
+    name: audit-containers.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# =============================================================================
 # Setup secret refresh service
 # =============================================================================
 
@@ -203,12 +234,17 @@
       Restore enabled: {{ restore_enabled }}
       
       Management scripts:
-        - /opt/scripts/deploy-apps.sh      # Redeploy all apps
-        - /opt/scripts/app-status.sh       # Check app status
+        - /opt/scripts/deploy-apps.sh        # Redeploy all apps
+        - /opt/scripts/app-status.sh         # Check app status
+        - /opt/scripts/audit-containers.sh   # Detect rogue/missing containers
         - /usr/local/bin/refresh-secrets.sh  # Refresh secrets from Infisical
       
-      Secret refresh:
-        - Timer: refresh-secrets.timer (runs hourly)
-        - Manual: refresh-secrets.sh [--force] [app-name]
+      Timers:
+        - audit-containers.timer   (every 15 min)
+        - refresh-secrets.timer    (hourly)
+      
+      Manual usage:
+        - audit-containers.sh [--json|--remove|--quiet]
+        - refresh-secrets.sh [--force] [app-name]
       
       ════════════════════════════════════════════════════════════════
