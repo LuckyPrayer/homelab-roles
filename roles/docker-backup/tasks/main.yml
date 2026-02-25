@@ -115,6 +115,148 @@
     backup_discord_webhook: "{{ backup_discord_webhook_result.stdout | default('') }}"
 
 # ============================================================================
+# Atlas backup SSH keypair — fetch or auto-generate
+# ============================================================================
+# The backup system uses a dedicated SSH keypair for rsync to atlas.
+# If keys don't exist in Infisical yet, we generate them automatically
+# and store them so all hosts share the same keypair.
+
+- name: Retrieve BACKUP_SSH_PRIVATE_KEY from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get BACKUP_SSH_PRIVATE_KEY --path="{{ backup_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+  register: backup_ssh_key_result
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+  failed_when: false
+  environment:
+    INFISICAL_TOKEN: "{{ backup_infisical_token }}"
+    INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+  when: backup_atlas_host | default('') | length > 0
+  run_once: true
+
+- name: Generate backup SSH keypair if not in Infisical
+  when:
+    - backup_atlas_host | default('') | length > 0
+    - backup_ssh_key_result.stdout | default('') | length == 0
+  run_once: true
+  block:
+    - name: Generate ed25519 SSH keypair for backup
+      ansible.builtin.shell: |
+        set -e
+        TMPDIR=$(mktemp -d)
+        ssh-keygen -t ed25519 -f "${TMPDIR}/atlas_backup" -N "" -C "homelab-backup-rsync" -q
+        cat "${TMPDIR}/atlas_backup"
+        echo "---PUBKEY_SEPARATOR---"
+        cat "${TMPDIR}/atlas_backup.pub"
+        rm -rf "${TMPDIR}"
+      register: backup_keygen_result
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      no_log: true
+
+    - name: Parse generated keypair
+      ansible.builtin.set_fact:
+        _generated_private_key: "{{ backup_keygen_result.stdout.split('---PUBKEY_SEPARATOR---')[0] | trim }}"
+        _generated_public_key: "{{ backup_keygen_result.stdout.split('---PUBKEY_SEPARATOR---')[1] | trim }}"
+      no_log: true
+
+    - name: Write keys to temp files for Infisical upload
+      ansible.builtin.copy:
+        content: "{{ item.content }}"
+        dest: "{{ item.dest }}"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: true
+      loop:
+        - { content: "{{ _generated_private_key }}", dest: "/tmp/.backup_ssh_privkey_tmp" }
+        - { content: "{{ _generated_public_key }}", dest: "/tmp/.backup_ssh_pubkey_tmp" }
+
+    - name: Store BACKUP_SSH_PRIVATE_KEY in Infisical via API
+      ansible.builtin.shell: |
+        set -eo pipefail
+        SECRET_VALUE=$(jq -Rs . < /tmp/.backup_ssh_privkey_tmp)
+        # Try to create (POST); if it already exists, update (PATCH)
+        HTTP_CODE=$(curl -s -o /tmp/.infisical_resp -w '%{http_code}' \
+          -X POST "{{ lookup('env', 'INFISICAL_API_URL') | default('https://app.infisical.com', true) }}/api/v3/secrets/raw/BACKUP_SSH_PRIVATE_KEY" \
+          -H "Authorization: Bearer $INFISICAL_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"workspaceId\": \"$INFISICAL_PROJECT_ID\", \"environment\": \"{{ env | default('dev') }}\", \"secretPath\": \"{{ backup_infisical_path }}\", \"secretValue\": ${SECRET_VALUE}, \"type\": \"shared\"}")
+        if [ "$HTTP_CODE" = "400" ]; then
+          HTTP_CODE=$(curl -s -o /tmp/.infisical_resp -w '%{http_code}' \
+            -X PATCH "{{ lookup('env', 'INFISICAL_API_URL') | default('https://app.infisical.com', true) }}/api/v3/secrets/raw/BACKUP_SSH_PRIVATE_KEY" \
+            -H "Authorization: Bearer $INFISICAL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"workspaceId\": \"$INFISICAL_PROJECT_ID\", \"environment\": \"{{ env | default('dev') }}\", \"secretPath\": \"{{ backup_infisical_path }}\", \"secretValue\": ${SECRET_VALUE}, \"type\": \"shared\"}")
+        fi
+        rm -f /tmp/.infisical_resp
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "Failed to store private key, HTTP $HTTP_CODE" >&2
+          exit 1
+        fi
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      no_log: true
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Store BACKUP_SSH_PUBLIC_KEY in Infisical via API
+      ansible.builtin.shell: |
+        set -eo pipefail
+        SECRET_VALUE=$(jq -Rs . < /tmp/.backup_ssh_pubkey_tmp)
+        HTTP_CODE=$(curl -s -o /tmp/.infisical_resp -w '%{http_code}' \
+          -X POST "{{ lookup('env', 'INFISICAL_API_URL') | default('https://app.infisical.com', true) }}/api/v3/secrets/raw/BACKUP_SSH_PUBLIC_KEY" \
+          -H "Authorization: Bearer $INFISICAL_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"workspaceId\": \"$INFISICAL_PROJECT_ID\", \"environment\": \"{{ env | default('dev') }}\", \"secretPath\": \"{{ backup_infisical_path }}\", \"secretValue\": ${SECRET_VALUE}, \"type\": \"shared\"}")
+        if [ "$HTTP_CODE" = "400" ]; then
+          HTTP_CODE=$(curl -s -o /tmp/.infisical_resp -w '%{http_code}' \
+            -X PATCH "{{ lookup('env', 'INFISICAL_API_URL') | default('https://app.infisical.com', true) }}/api/v3/secrets/raw/BACKUP_SSH_PUBLIC_KEY" \
+            -H "Authorization: Bearer $INFISICAL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"workspaceId\": \"$INFISICAL_PROJECT_ID\", \"environment\": \"{{ env | default('dev') }}\", \"secretPath\": \"{{ backup_infisical_path }}\", \"secretValue\": ${SECRET_VALUE}, \"type\": \"shared\"}")
+        fi
+        rm -f /tmp/.infisical_resp
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "Failed to store public key, HTTP $HTTP_CODE" >&2
+          exit 1
+        fi
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      no_log: true
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Remove temp key files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      loop:
+        - /tmp/.backup_ssh_privkey_tmp
+        - /tmp/.backup_ssh_pubkey_tmp
+
+    - name: Update SSH key result with generated key
+      ansible.builtin.set_fact:
+        backup_ssh_key_result:
+          stdout: "{{ _generated_private_key }}"
+      no_log: true
+
+- name: Set BACKUP_SSH_PRIVATE_KEY fact
+  ansible.builtin.set_fact:
+    backup_ssh_private_key: "{{ backup_ssh_key_result.stdout | default('') }}"
+  no_log: true
+  when: backup_atlas_host | default('') | length > 0
+
+# ============================================================================
 # Install dependencies
 # ============================================================================
 
@@ -124,6 +266,7 @@
       - curl
       - jq
       - bzip2
+      - rsync
     state: present
     update_cache: yes
   become: true
@@ -172,6 +315,35 @@
 - name: Display restic version
   ansible.builtin.debug:
     msg: "Restic installed: {{ restic_version.stdout }}"
+
+# ============================================================================
+# Deploy Atlas backup SSH key (for rsync to atlas)
+# ============================================================================
+
+- name: Create SSH directory for Atlas backup key
+  ansible.builtin.file:
+    path: "{{ backup_atlas_ssh_key_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  become: true
+  when:
+    - backup_atlas_host | default('') | length > 0
+    - backup_ssh_private_key | default('') | length > 0
+
+- name: Deploy Atlas backup SSH private key
+  ansible.builtin.copy:
+    content: "{{ backup_ssh_private_key }}\n"
+    dest: "{{ backup_atlas_ssh_key_path }}"
+    owner: root
+    group: root
+    mode: '0600'
+  become: true
+  no_log: true
+  when:
+    - backup_atlas_host | default('') | length > 0
+    - backup_ssh_private_key | default('') | length > 0
 
 # ============================================================================
 # Deploy backup/restore scripts from homelab-backup repo
@@ -225,12 +397,18 @@
 - name: Deploy backup.env
   ansible.builtin.copy:
     content: |
-      # Backblaze B2 Configuration (native restic backend)
+      # Atlas Backup Server (primary backup target)
+      ATLAS_HOST={{ backup_atlas_host }}
+      ATLAS_USER={{ backup_atlas_user }}
+      ATLAS_SSH_KEY={{ backup_atlas_ssh_key_path }}
+      ATLAS_BACKUP_DIR={{ backup_atlas_backup_dir }}
+
+      # Backblaze B2 Configuration (restore fallback)
       B2_ACCOUNT_ID={{ backup_b2_account_id }}
       B2_ACCOUNT_KEY={{ backup_b2_account_key }}
       B2_BUCKET={{ backup_b2_bucket }}
 
-      # Restic encryption password
+      # Restic encryption password (for B2 restore fallback)
       RESTIC_PASSWORD={{ backup_restic_password }}
 
       # Discord Notifications

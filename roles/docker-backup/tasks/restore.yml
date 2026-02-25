@@ -1,11 +1,33 @@
 ---
 # Docker Backup Role - Pre-Deployment Restore
-# Restores data from B2 backups BEFORE containers start.
-# Scripts and credentials are already deployed by the main tasks.
+# Restores data from Atlas backup server (primary) or B2 (fallback)
+# BEFORE containers start. Scripts and credentials are already deployed.
 
 - name: Pre-deployment restore
   block:
-    - name: Check for available snapshots
+    - name: Check for backups on Atlas
+      ansible.builtin.shell: |
+        source /opt/scripts/backup.env
+        if [[ -n "${ATLAS_HOST}" ]] && [[ -n "${ATLAS_USER}" ]]; then
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes"
+          if [[ -n "${ATLAS_SSH_KEY}" ]] && [[ -f "${ATLAS_SSH_KEY}" ]]; then
+            SSH_OPTS="${SSH_OPTS} -i ${ATLAS_SSH_KEY}"
+          fi
+          ATLAS_DIR="${ATLAS_BACKUP_DIR:-/opt/backrest/data/backups}/{{ inventory_hostname }}"
+          if ssh ${SSH_OPTS} "${ATLAS_USER}@${ATLAS_HOST}" "test -d '${ATLAS_DIR}' && find '${ATLAS_DIR}' -name '*.tar.gz' 2>/dev/null | head -1 | grep -q ." 2>/dev/null; then
+            echo "atlas"
+            exit 0
+          fi
+        fi
+        echo "none"
+      args:
+        executable: /bin/bash
+      register: atlas_check
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: Check for available B2 snapshots (fallback)
       ansible.builtin.shell: |
         source /opt/scripts/backup.env
         export RESTIC_REPOSITORY="b2:${B2_BUCKET}:{{ inventory_hostname }}"
@@ -21,41 +43,42 @@
     - name: Parse snapshots
       ansible.builtin.set_fact:
         available_snapshots: "{{ snapshots_check.stdout | from_json }}"
+        has_atlas_backups: "{{ atlas_check.stdout | default('none') == 'atlas' }}"
       when: snapshots_check.rc == 0
 
     - name: Display pre-restore info
       ansible.builtin.debug:
         msg:
           - "╔════════════════════════════════════════════════════════════════╗"
-          - "║              Pre-Deployment Restore from B2                    ║"
+          - "║              Pre-Deployment Restore                            ║"
           - "╚════════════════════════════════════════════════════════════════╝"
           - ""
           - "🔍 Checking for existing backups for {{ inventory_hostname }}..."
-          - "   Repository: b2:{{ backup_b2_bucket }}:{{ inventory_hostname }}"
-          - "   Snapshots found: {{ available_snapshots | length | default(0) }}"
+          - "   Atlas backups: {{ 'Available ✅' if has_atlas_backups | default(false) else 'Not found' }}"
+          - "   B2 snapshots: {{ available_snapshots | length | default(0) }}"
+          - "   Restore priority: Atlas → B2 fallback"
 
-    - name: Skip restore if no snapshots available
+    - name: Skip restore if no backups available
       ansible.builtin.debug:
         msg: |
-          ⚠️  No snapshots found for host {{ inventory_hostname }}
+          ⚠️  No backups found for host {{ inventory_hostname }}
           This is expected for first-time deployments.
           Fresh containers will be deployed.
       when: 
+        - not (has_atlas_backups | default(false))
         - available_snapshots is defined
         - available_snapshots | length == 0
 
-    - name: Pre-restore Harbor data (if snapshots exist)
+    - name: Pre-restore Harbor data (if backups exist)
       when: 
-        - available_snapshots is defined
-        - available_snapshots | length > 0
+        - (has_atlas_backups | default(false)) or (available_snapshots is defined and available_snapshots | length > 0)
         - inventory_hostname in ['hephaestus-dev', 'hephaestus-prod']
       block:
         - name: Display restore plan
           ansible.builtin.debug:
             msg:
               - "🔄 Restoring Harbor data before deployment..."
-              - "   Latest snapshot: {{ available_snapshots[-1].short_id }}"
-              - "   Time: {{ available_snapshots[-1].time }}"
+              - "   Source: {{ 'Atlas (primary)' if has_atlas_backups | default(false) else 'B2 (fallback)' }}"
               - ""
               - "   Using --data-only mode: containers not started"
               - "   Harbor will start fresh with restored data"
@@ -84,15 +107,28 @@
               - "   Data directory exists: {{ harbor_data_check.stat.exists }}"
           when: harbor_data_check is defined
 
-    - name: Pre-restore Orion stacks (if snapshots exist)
+    - name: Pre-restore Orion stacks (if backups exist)
       when: 
-        - available_snapshots is defined
-        - available_snapshots | length > 0
+        - (has_atlas_backups | default(false)) or (available_snapshots is defined and available_snapshots | length > 0)
         - inventory_hostname in ['orion-dev', 'orion-prod']
       block:
-        - name: Get list of backed up stacks
+        - name: Get list of backed up stacks from Atlas or B2
           ansible.builtin.shell: |
             source /opt/scripts/backup.env
+            # Check Atlas first
+            if [[ -n "${ATLAS_HOST:-}" ]] && [[ -n "${ATLAS_USER:-}" ]]; then
+              SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes"
+              if [[ -n "${ATLAS_SSH_KEY:-}" ]] && [[ -f "${ATLAS_SSH_KEY}" ]]; then
+                SSH_OPTS="${SSH_OPTS} -i ${ATLAS_SSH_KEY}"
+              fi
+              ATLAS_DIR="${ATLAS_BACKUP_DIR:-/opt/backrest/data/backups}/{{ inventory_hostname }}"
+              stacks=$(ssh ${SSH_OPTS} "${ATLAS_USER}@${ATLAS_HOST}" "find '${ATLAS_DIR}/' -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null" 2>/dev/null || echo "")
+              if [[ -n "$stacks" ]]; then
+                echo "$stacks"
+                exit 0
+              fi
+            fi
+            # Fall back to B2
             export RESTIC_REPOSITORY="b2:${B2_BUCKET}:{{ inventory_hostname }}"
             export B2_ACCOUNT_ID B2_ACCOUNT_KEY RESTIC_PASSWORD
             restic snapshots --host "{{ inventory_hostname }}" --json 2>/dev/null | \
@@ -130,13 +166,25 @@
 
     - name: Pre-restore Komodo MongoDB (argus hosts)
       when: 
-        - available_snapshots is defined
-        - available_snapshots | length > 0
+        - (has_atlas_backups | default(false)) or (available_snapshots is defined and available_snapshots | length > 0)
         - inventory_hostname in ['argus-dev', 'argus-prod']
       block:
-        - name: Check if komodo snapshot tag exists
+        - name: Check if komodo backup exists on Atlas or B2
           ansible.builtin.shell: |
             source /opt/scripts/backup.env
+            # Check Atlas first
+            if [[ -n "${ATLAS_HOST:-}" ]] && [[ -n "${ATLAS_USER:-}" ]]; then
+              SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes"
+              if [[ -n "${ATLAS_SSH_KEY:-}" ]] && [[ -f "${ATLAS_SSH_KEY}" ]]; then
+                SSH_OPTS="${SSH_OPTS} -i ${ATLAS_SSH_KEY}"
+              fi
+              ATLAS_DIR="${ATLAS_BACKUP_DIR:-/opt/backrest/data/backups}/{{ inventory_hostname }}/komodo"
+              if ssh ${SSH_OPTS} "${ATLAS_USER}@${ATLAS_HOST}" "test -d '${ATLAS_DIR}' && ls '${ATLAS_DIR}'/*.tar.gz &>/dev/null" 2>/dev/null; then
+                echo "1"
+                exit 0
+              fi
+            fi
+            # Fall back to B2
             export RESTIC_REPOSITORY="b2:${B2_BUCKET}:{{ inventory_hostname }}"
             export B2_ACCOUNT_ID B2_ACCOUNT_KEY RESTIC_PASSWORD
             restic snapshots --host "{{ inventory_hostname }}" --tag komodo --json 2>/dev/null | jq -r 'length' || echo "0"

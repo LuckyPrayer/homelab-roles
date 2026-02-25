@@ -127,7 +127,7 @@ done
 # =============================================================================
 mapfile -t RUNNING < <(docker ps --format '{{ '{{' }}.Names{{ '}}' }}' 2>/dev/null | sort)
 
-if [[ ${#RUNNING[@]} -eq 0 ]]; then
+if [[ ${{ '{#' }}RUNNING[@]} -eq 0 ]]; then
     if [[ "$OUTPUT_JSON" == "true" ]]; then
         echo '{"host":"'"$HOST"'","error":"no running containers or docker unavailable"}'
     else
@@ -170,7 +170,7 @@ done
 # Determine overall status
 # =============================================================================
 HAS_ISSUES=false
-[[ ${#ROGUE[@]} -gt 0 ]] || [[ ${#MISSING[@]} -gt 0 ]] && HAS_ISSUES=true
+[[ ${{ '{#' }}ROGUE[@]} -gt 0 ]] || [[ ${{ '{#' }}MISSING[@]} -gt 0 ]] && HAS_ISSUES=true
 
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -178,17 +178,17 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # JSON output mode
 # =============================================================================
 if [[ "$OUTPUT_JSON" == "true" ]]; then
-    if [[ ${#ROGUE[@]} -gt 0 ]]; then
+    if [[ ${{ '{#' }}ROGUE[@]} -gt 0 ]]; then
         rogue_json=$(printf '%s\n' "${ROGUE[@]}" | jq -R . | jq -s . 2>/dev/null || echo '[]')
     else
         rogue_json='[]'
     fi
-    if [[ ${#MISSING[@]} -gt 0 ]]; then
+    if [[ ${{ '{#' }}MISSING[@]} -gt 0 ]]; then
         missing_json=$(printf '%s\n' "${MISSING[@]}" | jq -R . | jq -s . 2>/dev/null || echo '[]')
     else
         missing_json='[]'
     fi
-    if [[ ${#OK[@]} -gt 0 ]]; then
+    if [[ ${{ '{#' }}OK[@]} -gt 0 ]]; then
         ok_json=$(printf '%s\n' "${OK[@]}" | jq -R . | jq -s . 2>/dev/null || echo '[]')
     else
         ok_json='[]'
@@ -236,7 +236,7 @@ echo -e "${BOLD}═════════════════════�
 echo ""
 
 # Healthy containers
-if [[ ${#OK[@]} -gt 0 ]]; then
+if [[ ${{ '{#' }}OK[@]} -gt 0 ]]; then
     echo -e "${BOLD}Healthy containers:${NC}"
     for ctr in "${OK[@]}"; do
         source="${EXPECTED_MAP[$ctr]}"
@@ -246,7 +246,7 @@ if [[ ${#OK[@]} -gt 0 ]]; then
 fi
 
 # Rogue containers
-if [[ ${#ROGUE[@]} -gt 0 ]]; then
+if [[ ${{ '{#' }}ROGUE[@]} -gt 0 ]]; then
     echo -e "${RED}${BOLD}⚠ Rogue containers (not in manifest or infra):${NC}"
     for ctr in "${ROGUE[@]}"; do
         # Try to find where it was started from
@@ -260,7 +260,7 @@ if [[ ${#ROGUE[@]} -gt 0 ]]; then
 fi
 
 # Missing containers
-if [[ ${#MISSING[@]} -gt 0 ]]; then
+if [[ ${{ '{#' }}MISSING[@]} -gt 0 ]]; then
     echo -e "${YELLOW}${BOLD}⚠ Missing containers (expected but not running):${NC}"
     for ctr in "${MISSING[@]}"; do
         source="${EXPECTED_MAP[$ctr]}"
@@ -271,7 +271,7 @@ fi
 
 # Summary
 echo -e "${BOLD}────────────────────────────────────────────────────────────────${NC}"
-echo -e "  Running: ${#RUNNING[@]}  |  Expected: ${#EXPECTED_MAP[@]}  |  Rogue: ${#ROGUE[@]}  |  Missing: ${#MISSING[@]}"
+echo -e "  Running: ${{ '{#' }}RUNNING[@]}  |  Expected: ${{ '{#' }}EXPECTED_MAP[@]}  |  Rogue: ${{ '{#' }}ROGUE[@]}  |  Missing: ${{ '{#' }}MISSING[@]}"
 
 if [[ "$HAS_ISSUES" == "false" ]]; then
     echo -e "  ${GREEN}${BOLD}✓ All containers accounted for${NC}"
@@ -284,7 +284,7 @@ echo ""
 # =============================================================================
 # Remove rogue containers (if requested)
 # =============================================================================
-if [[ "$REMOVE_ROGUE" == "true" ]] && [[ ${#ROGUE[@]} -gt 0 ]]; then
+if [[ "$REMOVE_ROGUE" == "true" ]] && [[ ${{ '{#' }}ROGUE[@]} -gt 0 ]]; then
     echo -e "${YELLOW}Removing rogue containers...${NC}"
     for ctr in "${ROGUE[@]}"; do
         workdir=$(docker inspect "$ctr" --format '{{ '{{' }}index .Config.Labels "com.docker.compose.project.working_dir"{{ '}}' }}' 2>/dev/null || echo "")
@@ -308,14 +308,14 @@ fi
 if [[ "$HAS_ISSUES" == "true" ]] && [[ -n "$DISCORD_WEBHOOK_URL" ]]; then
     alert_body=""
     
-    if [[ ${#ROGUE[@]} -gt 0 ]]; then
+    if [[ ${{ '{#' }}ROGUE[@]} -gt 0 ]]; then
         alert_body+="**Rogue containers:**\n"
         for ctr in "${ROGUE[@]}"; do
             alert_body+="• \`${ctr}\`\n"
         done
     fi
     
-    if [[ ${#MISSING[@]} -gt 0 ]]; then
+    if [[ ${{ '{#' }}MISSING[@]} -gt 0 ]]; then
         alert_body+="**Missing containers:**\n"
         for ctr in "${MISSING[@]}"; do
             alert_body+="• \`${ctr}\`\n"
@@ -327,8 +327,8 @@ if [[ "$HAS_ISSUES" == "true" ]] && [[ -n "$DISCORD_WEBHOOK_URL" ]]; then
         --arg env "$ENV" \
         --arg body "$alert_body" \
         --arg ts "$TIMESTAMP" \
-        --argjson rogue_count "${#ROGUE[@]}" \
-        --argjson missing_count "${#MISSING[@]}" \
+        --argjson rogue_count "${{ '{#' }}ROGUE[@]}" \
+        --argjson missing_count "${{ '{#' }}MISSING[@]}" \
         '{
             event: "container_audit",
             host: $host,

@@ -127,6 +127,29 @@
     enabled: yes
     state: started
 
+# Flush handlers NOW to apply networkd configuration before any
+# downstream service (dnsmasq, iptables NAT) tries to use the interfaces
+- name: Flush handlers to apply network configuration
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for additional interfaces to come up
+  ansible.builtin.wait_for:
+    path: "/sys/class/net/{{ item.name }}/carrier"
+    timeout: 30
+  loop: "{{ router_interfaces }}"
+  when: router_interfaces | length > 0
+  ignore_errors: true
+
+- name: Verify interfaces have IP addresses
+  ansible.builtin.shell: ip addr show {{ item.name }} | grep -q 'inet '
+  loop: "{{ router_interfaces }}"
+  when: router_interfaces | length > 0
+  register: iface_check
+  retries: 10
+  delay: 3
+  until: iface_check.rc == 0
+  changed_when: false
+
 - name: Configure NAT with iptables
   when: router_enable_nat | bool
   block:

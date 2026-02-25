@@ -1,0 +1,42 @@
+---
+# Backrest Role - Default Variables
+#
+# Backrest is a web-accessible backup solution built on top of restic.
+# It provides a WebUI for managing repos, browsing snapshots, restoring files,
+# and scheduling backup operations across multiple hosts.
+#
+# https://github.com/garethgeorge/backrest
+
+# Enable/disable deployment
+backrest_enabled: true
+
+# Container image
+backrest_image: "garethgeorge/backrest:v1.12.0"
+
+# Container name
+backrest_container_name: "backrest"
+
+# Web UI port
+backrest_port: 9898
+
+# Installation directory on target host
+backrest_base_dir: "/opt/backrest"
+
+# Data directory (stores Backrest internal database)
+backrest_data_dir: "/opt/backrest"
+
+# Timezone
+backrest_timezone: "America/Toronto"
+
+# Docker network
+backrest_network: "homelab"
+
+# Backup receiving directory (hosts push backups here via rsync)
+# Structure: <backrest_backups_dir>/<hostname>/<stack>/
+backrest_backups_dir: "/opt/backrest/backups"
+
+# Paths inside the container
+backrest_config_path: "/config/config.json"
+backrest_data_path: "/data"
+backrest_cache_path: "/cache"
+backrest_tmp_path: "/tmp"

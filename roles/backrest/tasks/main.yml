@@ -1,0 +1,119 @@
+---
+# Backrest Role - Main Tasks
+# Deploys the Backrest web UI for managing restic backups
+# https://github.com/garethgeorge/backrest
+
+- name: Check if Backrest is enabled
+  ansible.builtin.debug:
+    msg: "Backrest deployment {{ 'enabled' if backrest_enabled else 'disabled (skipping)' }}"
+
+- name: Deploy Backrest
+  when: backrest_enabled | bool
+  block:
+    - name: Create Backrest directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ backrest_base_dir }}"
+        - "{{ backrest_base_dir }}/data"
+        - "{{ backrest_base_dir }}/config"
+        - "{{ backrest_base_dir }}/cache"
+        - "{{ backrest_base_dir }}/tmp"
+
+    # ========================================================================
+    # Create dedicated backup user for rsync access
+    # ========================================================================
+    - name: Create dedicated backup user
+      ansible.builtin.user:
+        name: "{{ backup_atlas_user | default('backupuser') }}"
+        comment: "Dedicated backup rsync user"
+        shell: /bin/bash
+        system: false
+        create_home: true
+        state: present
+      become: true
+
+    - name: Create backups directory for rsync targets
+      ansible.builtin.file:
+        path: "{{ backrest_backups_dir }}"
+        state: directory
+        owner: "{{ backup_atlas_user | default('backupuser') }}"
+        group: "{{ backup_atlas_user | default('backupuser') }}"
+        mode: "0755"
+
+    - name: Install rsync for receiving backups
+      ansible.builtin.apt:
+        name: rsync
+        state: present
+        update_cache: yes
+      become: true
+
+    - name: Fetch backup SSH public key from Infisical
+      ansible.builtin.shell: |
+        infisical secrets get BACKUP_SSH_PUBLIC_KEY --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+      register: backup_ssh_pub_key_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+      no_log: true
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Deploy backup SSH public key for rsync access
+      ansible.posix.authorized_key:
+        user: "{{ backup_atlas_user | default('backupuser') }}"
+        key: "{{ backup_ssh_pub_key_result.stdout }}"
+        state: present
+        comment: "homelab-backup-rsync"
+      when: backup_ssh_pub_key_result.stdout | default('') | length > 0
+
+    - name: Ensure homelab network exists
+      community.docker.docker_network:
+        name: "{{ backrest_network }}"
+        state: present
+
+    - name: Deploy Backrest docker-compose
+      ansible.builtin.template:
+        src: docker-compose.yml.j2
+        dest: "{{ backrest_base_dir }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart backrest
+
+    - name: Start Backrest
+      community.docker.docker_compose_v2:
+        project_src: "{{ backrest_base_dir }}"
+        state: present
+        pull: always
+      register: backrest_result
+
+    - name: Wait for Backrest to be healthy
+      ansible.builtin.uri:
+        url: "http://localhost:{{ backrest_port }}"
+        method: GET
+        status_code: [200, 401]
+      register: backrest_health
+      until: backrest_health.status in [200, 401]
+      retries: 15
+      delay: 5
+
+    - name: Display Backrest info
+      ansible.builtin.debug:
+        msg:
+          - "╔════════════════════════════════════════════════════════════════╗"
+          - "║            Backrest Deployed Successfully!                     ║"
+          - "╚════════════════════════════════════════════════════════════════╝"
+          - ""
+          - "Web UI: http://{{ ansible_host }}:{{ backrest_port }}"
+          - "Container: {{ backrest_container_name }}"
+          - "Data directory: {{ backrest_base_dir }}/data"
+          - "Config: {{ backrest_base_dir }}/config/config.json"
+          - ""
+          - "First-time setup will prompt for username and password."

@@ -36,6 +36,16 @@ backup_b2_bucket: ""
 backup_discord_webhook: ""
 
 # ============================================================================
+# Atlas backup server (centralized backup target)
+# ============================================================================
+# Atlas receives host backups via rsync, Backrest on Atlas manages B2 uploads.
+# Set backup_atlas_host to empty to disable atlas sync (e.g. on atlas itself).
+backup_atlas_host: ""
+backup_atlas_user: "backupuser"
+backup_atlas_ssh_key_path: "/root/.ssh/atlas_backup"
+backup_atlas_backup_dir: "/opt/backrest/backups"
+
+# ============================================================================
 # Restore configuration
 # ============================================================================
 # Automatic pre-deployment restore is disabled by default to prevent

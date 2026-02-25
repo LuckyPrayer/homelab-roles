@@ -1,0 +1,7 @@
+---
+# Backrest handlers
+
+- name: Restart backrest
+  community.docker.docker_compose_v2:
+    project_src: "{{ backrest_base_dir }}"
+    state: restarted
