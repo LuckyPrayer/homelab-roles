@@ -54,7 +54,7 @@
 
     - name: Fetch backup SSH public key from Infisical
       ansible.builtin.shell: |
-        infisical secrets get BACKUP_SSH_PUBLIC_KEY --path="/infrastructure/backup" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+        infisical secrets get BACKUP_SSH_PUBLIC_KEY --path="{{ backrest_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
       register: backup_ssh_pub_key_result
       delegate_to: localhost
       become: false
@@ -72,6 +72,126 @@
         state: present
         comment: "homelab-backup-rsync"
       when: backup_ssh_pub_key_result.stdout | default('') | length > 0
+
+    # ========================================================================
+    # Fetch B2 and restic secrets from Infisical for Backrest config
+    # ========================================================================
+    - name: Fetch B2 Account ID from Infisical
+      ansible.builtin.shell: |
+        infisical secrets get B2_ACCOUNT_ID --path="{{ backrest_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+      register: b2_account_id_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch B2 Account Key from Infisical
+      ansible.builtin.shell: |
+        infisical secrets get B2_ACCOUNT_KEY --path="{{ backrest_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+      register: b2_account_key_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch B2 Bucket from Infisical
+      ansible.builtin.shell: |
+        infisical secrets get B2_BUCKET --path="{{ backrest_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+      register: b2_bucket_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch Restic Password from Infisical
+      ansible.builtin.shell: |
+        infisical secrets get RESTIC_PASSWORD --path="{{ backrest_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+      register: restic_password_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Fetch Discord Webhook URL from Infisical
+      ansible.builtin.shell: |
+        infisical secrets get DISCORD_WEBHOOK_URL --path="{{ backrest_infisical_path }}" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env={{ env | default('dev') }}
+      register: discord_webhook_result
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+      no_log: true
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+
+    - name: Set Backrest secret facts
+      ansible.builtin.set_fact:
+        backrest_b2_account_id: "{{ b2_account_id_result.stdout }}"
+        backrest_b2_account_key: "{{ b2_account_key_result.stdout }}"
+        backrest_b2_bucket: "{{ b2_bucket_result.stdout }}"
+        backrest_restic_password: "{{ restic_password_result.stdout }}"
+        backrest_discord_webhook_url: "{{ discord_webhook_result.stdout | default('') }}"
+      no_log: true
+
+    # ========================================================================
+    # Read existing config to preserve modno and auth settings
+    # ========================================================================
+    - name: Check for existing Backrest config
+      ansible.builtin.stat:
+        path: "{{ backrest_base_dir }}/config/config.json"
+      register: existing_config_stat
+
+    - name: Read modno from existing config
+      ansible.builtin.shell: |
+        cat {{ backrest_base_dir }}/config/config.json | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('modno', 0))"
+      register: existing_modno_result
+      changed_when: false
+      when: existing_config_stat.stat.exists
+
+    - name: Read auth users from existing config
+      ansible.builtin.shell: |
+        cat {{ backrest_base_dir }}/config/config.json | python3 -c "import sys,json; c=json.load(sys.stdin); print(json.dumps(c.get('auth', {}).get('users', [])))"
+      register: existing_auth_users_result
+      changed_when: false
+      when: existing_config_stat.stat.exists
+
+    - name: Read auth disabled from existing config
+      ansible.builtin.shell: |
+        cat {{ backrest_base_dir }}/config/config.json | python3 -c "import sys,json; c=json.load(sys.stdin); print(str(c.get('auth', {}).get('disabled', True)).lower())"
+      register: existing_auth_disabled_result
+      changed_when: false
+      when: existing_config_stat.stat.exists
+
+    - name: Set config preservation facts
+      ansible.builtin.set_fact:
+        backrest_config_modno: "{{ (existing_modno_result.stdout | int + 1) if existing_config_stat.stat.exists else 1 }}"
+        backrest_auth_users: "{{ (existing_auth_users_result.stdout | from_json) if existing_config_stat.stat.exists else [] }}"
+        backrest_auth_disabled: "{{ existing_auth_disabled_result.stdout | default('true') if existing_config_stat.stat.exists else true }}"
+
+    # ========================================================================
+    # Deploy Backrest configuration and container
+    # ========================================================================
+    - name: Deploy Backrest config.json
+      ansible.builtin.template:
+        src: config.json.j2
+        dest: "{{ backrest_base_dir }}/config/config.json"
+        owner: root
+        group: root
+        mode: "0600"
+      notify: Restart backrest
 
     - name: Ensure homelab network exists
       community.docker.docker_network:
@@ -113,7 +233,9 @@
           - ""
           - "Web UI: http://{{ ansible_host }}:{{ backrest_port }}"
           - "Container: {{ backrest_container_name }}"
-          - "Data directory: {{ backrest_base_dir }}/data"
           - "Config: {{ backrest_base_dir }}/config/config.json"
           - ""
-          - "First-time setup will prompt for username and password."
+          - "B2 Repo: b2:{{ backrest_b2_bucket }}:{{ backrest_b2_repo_prefix }}"
+          - "Backup Plans: {{ backrest_backup_hosts | map(attribute='name') | list | join(', ') }}"
+          - "Retention: {{ backrest_retention_daily }}d / {{ backrest_retention_weekly }}w / {{ backrest_retention_monthly }}m"
+          - "Discord Notifications: {{ 'Enabled' if backrest_discord_webhook_url | default('') | length > 0 else 'Disabled' }}"

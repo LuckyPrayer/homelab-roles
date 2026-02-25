@@ -40,3 +40,63 @@ backrest_config_path: "/config/config.json"
 backrest_data_path: "/data"
 backrest_cache_path: "/cache"
 backrest_tmp_path: "/tmp"
+
+# ========================================================================
+# B2 Offsite Repository Configuration
+# Backrest will back up local backup archives to Backblaze B2 via restic
+# ========================================================================
+
+# B2 repo identifier in Backrest
+backrest_b2_repo_id: "b2-offsite"
+
+# B2 repo path prefix (inside the bucket)
+backrest_b2_repo_prefix: "backrest/{{ inventory_hostname }}"
+
+# Config modno (incremented on each config update)
+backrest_config_modno: 1
+
+# ========================================================================
+# Backup Plans - One per host that pushes backups to Atlas
+# ========================================================================
+
+# Default backup schedule (cron) - 3 AM daily, local time
+backrest_default_backup_schedule: "0 3 * * *"
+
+# Hosts to back up (override in inventory)
+# Each entry: { name: "hostname", schedule: "cron expression" (optional) }
+backrest_backup_hosts: []
+
+# ========================================================================
+# Retention Policy - Applied to each backup plan
+# Uses restic's time-bucketed retention (forget --keep-X)
+# ========================================================================
+backrest_retention_hourly: 0
+backrest_retention_daily: 7
+backrest_retention_weekly: 4
+backrest_retention_monthly: 6
+backrest_retention_yearly: 0
+
+# ========================================================================
+# Repository Maintenance Schedules
+# ========================================================================
+
+# Prune schedule - weekly on Sunday at 4 AM (relative to last run)
+backrest_prune_schedule: "0 4 * * 0"
+backrest_prune_max_unused_percent: 10
+
+# Check schedule - monthly on 1st at 5 AM (relative to last run)
+backrest_check_schedule: "0 5 1 * *"
+backrest_check_read_data_percent: 5
+
+# ========================================================================
+# Authentication
+# ========================================================================
+backrest_auth_disabled: true
+backrest_auth_users: []
+
+# ========================================================================
+# Infisical Secrets Path
+# B2_ACCOUNT_ID, B2_ACCOUNT_KEY, B2_BUCKET, RESTIC_PASSWORD,
+# DISCORD_WEBHOOK_URL are fetched from this path
+# ========================================================================
+backrest_infisical_path: "/infrastructure/backup"
