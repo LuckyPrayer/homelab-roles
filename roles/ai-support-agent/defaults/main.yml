@@ -6,6 +6,7 @@ oracle_user: "oracle"
 oracle_uid: 3100
 oracle_gid: 3100
 oracle_home: "/home/oracle"
+oracle_base_dir: "/opt/infrastructure/oracle"
 oracle_command_prefix: "!"
 
 # Container and image naming

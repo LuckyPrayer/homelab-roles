@@ -20,10 +20,10 @@ backrest_container_name: "backrest"
 backrest_port: 9898
 
 # Installation directory on target host
-backrest_base_dir: "/opt/backrest"
+backrest_base_dir: "/opt/infrastructure/backrest"
 
 # Data directory (stores Backrest internal database)
-backrest_data_dir: "/opt/backrest"
+backrest_data_dir: "/opt/infrastructure/backrest"
 
 # Timezone
 backrest_timezone: "America/Toronto"
@@ -33,7 +33,7 @@ backrest_network: "homelab"
 
 # Backup receiving directory (hosts push backups here via rsync)
 # Structure: <backrest_backups_dir>/<hostname>/<stack>/
-backrest_backups_dir: "/opt/backrest/backups"
+backrest_backups_dir: "/opt/infrastructure/backrest/backups"
 
 # Paths inside the container
 backrest_config_path: "/config/config.json"

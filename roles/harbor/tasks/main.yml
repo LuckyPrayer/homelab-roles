@@ -190,7 +190,7 @@
 - name: Add Redis config volume mount to docker-compose.yml
   lineinfile:
     path: "{{ harbor_install_dir }}/harbor/docker-compose.yml"
-    insertafter: '^\s+- /opt/harbor/data/redis:/var/lib/redis'
+    insertafter: '- .*data/redis:/var/lib/redis'
     line: '      - ./common/config/redis/redis.conf:/etc/redis.conf:ro'
     state: present
   when: harbor_prepare_result is changed or redis_config_deployed is changed
@@ -285,10 +285,10 @@
 # ============================================================================
 # Step 8: Create symlink for backup/restore script compatibility
 # ============================================================================
-# The backup/restore scripts look for docker-compose.yml in /opt/harbor
+# The backup/restore scripts look for docker-compose.yml in the harbor data directory
 # but Harbor is installed in {{ harbor_install_dir }}/harbor
 
-- name: Create symlink for docker-compose.yml in /opt/harbor
+- name: Create symlink for docker-compose.yml in harbor data directory
   file:
     src: "{{ harbor_install_dir }}/harbor/docker-compose.yml"
     dest: "{{ harbor_data_dir | dirname }}/docker-compose.yml"

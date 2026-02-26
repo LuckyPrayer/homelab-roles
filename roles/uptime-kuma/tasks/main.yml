@@ -18,8 +18,8 @@
     group: "1000"
     mode: "0755"
   loop:
-    - "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}"
-    - "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}/data"
+    - "{{ uptime_kuma_base_dir | default('/opt/infrastructure/uptime-kuma') }}"
+    - "{{ uptime_kuma_base_dir | default('/opt/infrastructure/uptime-kuma') }}/data"
   when: uptime_kuma_enabled | default(false)
   tags: [uptime-kuma]
 
@@ -33,7 +33,7 @@
 - name: Template Uptime Kuma docker-compose
   ansible.builtin.template:
     src: docker-compose.yml.j2
-    dest: "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}/docker-compose.yml"
+    dest: "{{ uptime_kuma_base_dir | default('/opt/infrastructure/uptime-kuma') }}/docker-compose.yml"
     owner: root
     group: root
     mode: "0644"
@@ -44,7 +44,7 @@
 - name: Template Uptime Kuma environment file
   ansible.builtin.template:
     src: env.j2
-    dest: "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}/.env"
+    dest: "{{ uptime_kuma_base_dir | default('/opt/infrastructure/uptime-kuma') }}/.env"
     owner: root
     group: root
     mode: "0600"
@@ -54,7 +54,7 @@
 
 - name: Start Uptime Kuma with docker compose
   community.docker.docker_compose_v2:
-    project_src: "{{ uptime_kuma_base_dir | default('/opt/uptime-kuma') }}"
+    project_src: "{{ uptime_kuma_base_dir | default('/opt/infrastructure/uptime-kuma') }}"
     state: present
     pull: always
   register: uptime_kuma_compose

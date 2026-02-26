@@ -33,15 +33,15 @@
 
 - name: restart pihole
   community.docker.docker_compose_v2:
-    project_src: /opt/pihole
+    project_src: "{{ pihole_base_dir }}"
     state: restarted
 - name: restart glances
   ansible.builtin.shell: |
-    cd /opt/stacks/glances
+    cd {{ glances_base_dir }}
     docker compose down && docker compose up -d
   changed_when: true  # Handler always implies a change triggered it
 
 - name: restart cloudflare-ddns
   community.docker.docker_compose_v2:
-    project_src: /opt/cloudflare-ddns
+    project_src: "{{ cloudflare_ddns_base_dir }}"
     state: restarted

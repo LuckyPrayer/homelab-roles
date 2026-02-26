@@ -3,7 +3,7 @@
 
 - name: Restart monitoring stack
   community.docker.docker_compose_v2:
-    project_src: /opt/monitoring
+    project_src: "{{ monitoring_base_dir }}"
     state: present
     build: never
     recreate: always

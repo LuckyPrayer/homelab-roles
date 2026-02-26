@@ -6,7 +6,7 @@
 traefik_aws_image: "traefik:2.11"
 
 # Installation directory
-traefik_aws_base_dir: "/opt/traefik"
+traefik_aws_base_dir: "/opt/infrastructure/traefik"
 
 # Traefik configuration
 traefik_aws_email: "admin@{{ base_domain }}"

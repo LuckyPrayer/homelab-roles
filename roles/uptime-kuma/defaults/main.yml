@@ -13,7 +13,7 @@ uptime_kuma_port: 3001
 uptime_kuma_network: "uptime-kuma-net"
 
 # Directory configuration
-uptime_kuma_base_dir: "/opt/uptime-kuma"
+uptime_kuma_base_dir: "/opt/infrastructure/uptime-kuma"
 
 # Environment
 uptime_kuma_timezone: "America/Toronto"

@@ -15,24 +15,24 @@
     group: root
     mode: "0755"
   loop:
-    - /opt/monitoring
-    - /opt/monitoring/grafana
-    - /opt/monitoring/grafana/provisioning
-    - /opt/monitoring/grafana/provisioning/datasources
-    - /opt/monitoring/grafana/provisioning/dashboards
-    - /opt/monitoring/grafana/provisioning/alerting
-    - /opt/monitoring/grafana/dashboards
-    - /opt/monitoring/prometheus
-    - /opt/monitoring/prometheus/rules
-    - /opt/monitoring/loki
-    - /opt/monitoring/alertmanager
-    - /opt/monitoring/alloy
+    - "{{ monitoring_base_dir }}"
+    - "{{ monitoring_base_dir }}/grafana"
+    - "{{ monitoring_base_dir }}/grafana/provisioning"
+    - "{{ monitoring_base_dir }}/grafana/provisioning/datasources"
+    - "{{ monitoring_base_dir }}/grafana/provisioning/dashboards"
+    - "{{ monitoring_base_dir }}/grafana/provisioning/alerting"
+    - "{{ monitoring_base_dir }}/grafana/dashboards"
+    - "{{ monitoring_base_dir }}/prometheus"
+    - "{{ monitoring_base_dir }}/prometheus/rules"
+    - "{{ monitoring_base_dir }}/loki"
+    - "{{ monitoring_base_dir }}/alertmanager"
+    - "{{ monitoring_base_dir }}/alloy"
   tags: [monitoring]
 
 - name: Template Prometheus configuration
   ansible.builtin.template:
     src: prometheus.yml.j2
-    dest: /opt/monitoring/prometheus/prometheus.yml
+    dest: "{{ monitoring_base_dir }}/prometheus/prometheus.yml"
     owner: root
     group: root
     mode: "0644"
@@ -42,7 +42,7 @@
 - name: Template Prometheus alert rules
   ansible.builtin.template:
     src: alert-rules.yml.j2
-    dest: /opt/monitoring/prometheus/rules/alerts.yml
+    dest: "{{ monitoring_base_dir }}/prometheus/rules/alerts.yml"
     owner: root
     group: root
     mode: "0644"
@@ -52,7 +52,7 @@
 - name: Template Loki configuration
   ansible.builtin.template:
     src: loki-config.yml.j2
-    dest: /opt/monitoring/loki/loki-config.yml
+    dest: "{{ monitoring_base_dir }}/loki/loki-config.yml"
     owner: root
     group: root
     mode: "0644"
@@ -62,7 +62,7 @@
 - name: Template Alertmanager configuration
   ansible.builtin.template:
     src: alertmanager.yml.j2
-    dest: /opt/monitoring/alertmanager/alertmanager.yml
+    dest: "{{ monitoring_base_dir }}/alertmanager/alertmanager.yml"
     owner: root
     group: root
     mode: "0644"
@@ -72,7 +72,7 @@
 - name: Template Alloy configuration
   ansible.builtin.template:
     src: alloy-config.river.j2
-    dest: /opt/monitoring/alloy/config.river
+    dest: "{{ monitoring_base_dir }}/alloy/config.river"
     owner: root
     group: root
     mode: "0644"
@@ -82,7 +82,7 @@
 - name: Template Grafana datasources
   ansible.builtin.template:
     src: grafana-datasources.yml.j2
-    dest: /opt/monitoring/grafana/provisioning/datasources/datasources.yml
+    dest: "{{ monitoring_base_dir }}/grafana/provisioning/datasources/datasources.yml"
     owner: root
     group: root
     mode: "0644"
@@ -92,7 +92,7 @@
 - name: Template Grafana alerting configuration
   ansible.builtin.template:
     src: grafana-alerting.yml.j2
-    dest: /opt/monitoring/grafana/provisioning/alerting/alerting.yml
+    dest: "{{ monitoring_base_dir }}/grafana/provisioning/alerting/alerting.yml"
     owner: root
     group: root
     mode: "0644"
@@ -102,7 +102,7 @@
 - name: Template Grafana alert rules
   ansible.builtin.template:
     src: grafana-alert-rules.yml.j2
-    dest: /opt/monitoring/grafana/provisioning/alerting/alert-rules.yml
+    dest: "{{ monitoring_base_dir }}/grafana/provisioning/alerting/alert-rules.yml"
     owner: root
     group: root
     mode: "0644"
@@ -112,7 +112,7 @@
 - name: Template Grafana dashboard provisioning
   ansible.builtin.template:
     src: grafana-dashboards.yml.j2
-    dest: /opt/monitoring/grafana/provisioning/dashboards/dashboards.yml
+    dest: "{{ monitoring_base_dir }}/grafana/provisioning/dashboards/dashboards.yml"
     owner: root
     group: root
     mode: "0644"
@@ -121,7 +121,7 @@
 - name: Copy default Grafana dashboards
   ansible.builtin.copy:
     src: "dashboards/"
-    dest: /opt/monitoring/grafana/dashboards/
+    dest: "{{ monitoring_base_dir }}/grafana/dashboards/"
     owner: root
     group: root
     mode: "0644"
@@ -130,7 +130,7 @@
 - name: Template docker-compose file
   ansible.builtin.template:
     src: docker-compose.yml.j2
-    dest: /opt/monitoring/docker-compose.yml
+    dest: "{{ monitoring_base_dir }}/docker-compose.yml"
     owner: root
     group: root
     mode: "0644"
@@ -140,7 +140,7 @@
 - name: Template environment file
   ansible.builtin.template:
     src: env.j2
-    dest: /opt/monitoring/.env
+    dest: "{{ monitoring_base_dir }}/.env"
     owner: root
     group: root
     mode: "0600"
@@ -158,7 +158,7 @@
 - name: Pull monitoring stack images
   ansible.builtin.command:
     cmd: docker compose pull
-    chdir: /opt/monitoring
+    chdir: "{{ monitoring_base_dir }}"
   register: monitoring_pull
   changed_when: "'Pull complete' in monitoring_pull.stdout or 'Downloaded' in monitoring_pull.stdout"
   tags: [monitoring]
@@ -166,7 +166,7 @@
 - name: Start monitoring stack
   ansible.builtin.command:
     cmd: docker compose up -d
-    chdir: /opt/monitoring
+    chdir: "{{ monitoring_base_dir }}"
   register: monitoring_up
   changed_when: "'Started' in monitoring_up.stderr or 'Created' in monitoring_up.stderr"
   tags: [monitoring]

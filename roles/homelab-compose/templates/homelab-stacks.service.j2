@@ -9,17 +9,17 @@ Type=oneshot
 RemainAfterExit=yes
 User=docker-svc
 Group=docker
-WorkingDirectory=/opt/stacks
+WorkingDirectory={{ stacks_base_dir }}
 Environment=INFISICAL_ENV={{ hostvars[inventory_hostname].env | default('dev') }}
 Environment=INFISICAL_PROJECT_ID={{ lookup('env', 'INFISICAL_PROJECT_ID') }}
 Environment=INFISICAL_TOKEN={{ lookup('env', 'INFISICAL_TOKEN') }}
 Environment=INFISICAL_PATHS="/ /infrastructure/n8n /infrastructure/backup /services/vaultwarden{% if minecraft_servers is defined %}{% for server in minecraft_servers %} /services/minecraft/{{ server.id }}{% endfor %}{% endif %}"
 
 # Start all stacks in order (traefik first, then others)
-ExecStart=/bin/bash -c 'for stack in /opt/stacks/*/; do cd "$stack" && /usr/local/bin/infisical-run docker compose up -d --pull=missing; done'
+ExecStart=/bin/bash -c 'for stack in {{ stacks_base_dir }}/*/; do cd "$stack" && /usr/local/bin/infisical-run docker compose up -d --pull=missing; done'
 
 # Stop all stacks
-ExecStop=/bin/bash -c 'for stack in /opt/stacks/*/; do cd "$stack" && docker compose down; done'
+ExecStop=/bin/bash -c 'for stack in {{ stacks_base_dir }}/*/; do cd "$stack" && docker compose down; done'
 
 TimeoutStartSec=300
 TimeoutStopSec=120
@@ -28,7 +28,7 @@ TimeoutStopSec=120
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/stacks
+ReadWritePaths={{ stacks_base_dir }}
 PrivateTmp=yes
 
 [Install]

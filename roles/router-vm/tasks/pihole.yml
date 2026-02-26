@@ -150,14 +150,14 @@
     owner: root
     group: root
   loop:
-    - /opt/pihole
-    - /opt/pihole/etc-pihole
-    - /opt/pihole/etc-dnsmasq.d
+    - "{{ pihole_base_dir }}"
+    - "{{ pihole_base_dir }}/etc-pihole"
+    - "{{ pihole_base_dir }}/etc-dnsmasq.d"
 
 - name: Deploy Pi-hole docker-compose configuration
   ansible.builtin.template:
     src: pihole-compose.yml.j2
-    dest: /opt/pihole/docker-compose.yml
+    dest: "{{ pihole_base_dir }}/docker-compose.yml"
     mode: '0644'
     owner: root
     group: root
@@ -169,7 +169,7 @@
       # Custom DNS configuration for Pi-hole
       # Local domains are handled by router dnsmasq
       # This file is managed by Ansible
-    dest: /opt/pihole/etc-dnsmasq.d/02-custom.conf
+    dest: "{{ pihole_base_dir }}/etc-dnsmasq.d/02-custom.conf"
     mode: '0644'
   notify: restart pihole
 
@@ -195,7 +195,7 @@
 - name: Start Pi-hole container
   ansible.builtin.command:
     cmd: docker compose up -d
-    chdir: /opt/pihole
+    chdir: "{{ pihole_base_dir }}"
   register: pihole_output
   changed_when: "'Started' in pihole_output.stderr or 'Created' in pihole_output.stderr"
 
@@ -227,7 +227,7 @@
       address=/{{ record.hostname }}/{{ record.ip }}
       {% endfor %}
       {% endif %}
-    dest: /opt/pihole/etc-dnsmasq.d/05-homelab-dns.conf
+    dest: "{{ pihole_base_dir }}/etc-dnsmasq.d/05-homelab-dns.conf"
     mode: '0644'
     owner: root
     group: root

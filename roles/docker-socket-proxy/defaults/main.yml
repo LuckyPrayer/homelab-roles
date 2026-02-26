@@ -14,7 +14,7 @@ docker_socket_proxy_port: 2375
 docker_socket_proxy_network: "homelab-network"
 
 # Directory configuration
-docker_socket_proxy_base_dir: "/opt/docker-socket-proxy"
+docker_socket_proxy_base_dir: "/opt/infrastructure/docker-socket-proxy"
 
 # API permissions (read-only by default for security)
 # Set to 1 to enable, 0 to disable

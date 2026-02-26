@@ -39,7 +39,7 @@ tags = ["{{ env | default('dev') }}", "registry", "infrastructure"]
 deploy = true
 [stack.config]
 server = "hephaestus-{{ env | default('dev') }}"
-run_directory = "/opt/harbor"
+run_directory = "/opt/infrastructure/harbor"
 file_paths = ["docker-compose.yml"]
 {% endif %}
 
@@ -62,7 +62,7 @@ file_paths = ["docker-compose.yml"]
 # STACKS - Monitoring (argus)
 # =============================================================================
 # NOTE: The monitoring stack (Prometheus, Grafana, Loki, etc.) is deployed as a
-# single stack at /opt/monitoring by the monitoring-stack role.
+# single stack at {{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }} by the monitoring-stack role.
 # It's not separated into individual stacks like other services.
 {% if 'argus-dev' in groups['docker_hosts'] | default([]) or 'argus-prod' in groups['docker_hosts'] | default([]) %}
 [[stack]]
@@ -72,7 +72,7 @@ tags = ["{{ env | default('dev') }}", "monitoring", "infrastructure"]
 deploy = true
 [stack.config]
 server = "argus-{{ env | default('dev') }}"
-run_directory = "/opt/monitoring"
+run_directory = "{{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}"
 file_paths = ["docker-compose.yml"]
 {% endif %}
 
@@ -145,7 +145,7 @@ executions = [
 # - All app definitions live in homelab-apps/manifest.yml
 # - Each app has its own config.yml with backup/restore settings
 # - Deploy apps via: ./scripts/run-playbook.sh --env=dev deploy-all --tags homelab-apps
-# - Or manually: ssh <host> "/opt/homelab-apps/scripts/deploy.sh <app>"
+# - Or manually: ssh <host> "/opt/apps/scripts/deploy.sh <app>"
 #
 # To add a new application:
 #   1. Create folder in homelab-apps repo (e.g., uptime-kuma/)

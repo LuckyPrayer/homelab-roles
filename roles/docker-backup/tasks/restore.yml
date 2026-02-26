@@ -13,7 +13,7 @@
           if [[ -n "${ATLAS_SSH_KEY}" ]] && [[ -f "${ATLAS_SSH_KEY}" ]]; then
             SSH_OPTS="${SSH_OPTS} -i ${ATLAS_SSH_KEY}"
           fi
-          ATLAS_DIR="${ATLAS_BACKUP_DIR:-/opt/backrest/data/backups}/{{ inventory_hostname }}"
+          ATLAS_DIR="${ATLAS_BACKUP_DIR:-/opt/infrastructure/backrest/backups}/{{ inventory_hostname }}"
           if ssh ${SSH_OPTS} "${ATLAS_USER}@${ATLAS_HOST}" "test -d '${ATLAS_DIR}' && find '${ATLAS_DIR}' -name '*.tar.gz' 2>/dev/null | head -1 | grep -q ." 2>/dev/null; then
             echo "atlas"
             exit 0
@@ -97,7 +97,7 @@
 
         - name: Check if restore created harbor data directory
           ansible.builtin.stat:
-            path: /opt/harbor
+            path: /opt/infrastructure/harbor
           register: harbor_data_check
 
         - name: Report restore status
@@ -121,7 +121,7 @@
               if [[ -n "${ATLAS_SSH_KEY:-}" ]] && [[ -f "${ATLAS_SSH_KEY}" ]]; then
                 SSH_OPTS="${SSH_OPTS} -i ${ATLAS_SSH_KEY}"
               fi
-              ATLAS_DIR="${ATLAS_BACKUP_DIR:-/opt/backrest/data/backups}/{{ inventory_hostname }}"
+              ATLAS_DIR="${ATLAS_BACKUP_DIR:-/opt/infrastructure/backrest/backups}/{{ inventory_hostname }}"
               stacks=$(ssh ${SSH_OPTS} "${ATLAS_USER}@${ATLAS_HOST}" "find '${ATLAS_DIR}/' -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null" 2>/dev/null || echo "")
               if [[ -n "$stacks" ]]; then
                 echo "$stacks"
@@ -178,7 +178,7 @@
               if [[ -n "${ATLAS_SSH_KEY:-}" ]] && [[ -f "${ATLAS_SSH_KEY}" ]]; then
                 SSH_OPTS="${SSH_OPTS} -i ${ATLAS_SSH_KEY}"
               fi
-              ATLAS_DIR="${ATLAS_BACKUP_DIR:-/opt/backrest/data/backups}/{{ inventory_hostname }}/komodo"
+              ATLAS_DIR="${ATLAS_BACKUP_DIR:-/opt/infrastructure/backrest/backups}/{{ inventory_hostname }}/komodo"
               if ssh ${SSH_OPTS} "${ATLAS_USER}@${ATLAS_HOST}" "test -d '${ATLAS_DIR}' && ls '${ATLAS_DIR}'/*.tar.gz &>/dev/null" 2>/dev/null; then
                 echo "1"
                 exit 0

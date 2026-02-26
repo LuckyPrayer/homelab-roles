@@ -1,6 +1,9 @@
 ---
 # Monitoring Stack - Default Variables
 
+# Installation directory on target host
+monitoring_base_dir: "/opt/infrastructure/monitoring"
+
 # Grafana Configuration
 grafana_enabled: true
 grafana_port: 3000

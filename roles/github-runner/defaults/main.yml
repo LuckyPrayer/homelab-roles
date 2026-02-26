@@ -13,7 +13,7 @@ github_runner_groups:
   - docker  # Required for docker-based actions
 
 # Installation directory
-github_runner_dir: "/opt/actions-runner"
+github_runner_dir: "/opt/infrastructure/github-runner"
 github_runner_work_dir: "_work"
 
 # Runner configuration

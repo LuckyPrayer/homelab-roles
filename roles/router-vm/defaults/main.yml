@@ -121,3 +121,8 @@ router_vlan_isolation_rules: []
 # Glances system monitoring (for Homepage widgets)
 router_enable_glances: true
 router_glances_allowed_networks: "192.168.0.0/16"  # Default: all private networks
+
+# Service directories
+pihole_base_dir: "/opt/infrastructure/pihole"
+cloudflare_ddns_base_dir: "/opt/infrastructure/cloudflare-ddns"
+glances_base_dir: "/opt/infrastructure/glances"

@@ -7,12 +7,12 @@
 # Variables:
 #   - homelab_apps_repo: Git repo URL (default from manifest settings)
 #   - homelab_apps_branch: Git branch (default: main)
-#   - homelab_apps_path: Local path on host (default: /opt/homelab-apps)
+#   - homelab_apps_path: Local path on host (default: /opt/apps)
 #   - homelab_apps_restore: Whether to restore from backup (default: from manifest)
 
 - name: Set default variables
   ansible.builtin.set_fact:
-    homelab_apps_path: "{{ homelab_apps_path | default('/opt/homelab-apps') }}"
+    homelab_apps_path: "{{ homelab_apps_path | default('/opt/apps') }}"
     homelab_apps_branch: "{{ homelab_apps_branch | default('main') }}"
 
 # =============================================================================

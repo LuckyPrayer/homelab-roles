@@ -8,9 +8,9 @@ harbor_version: "v2.11.1"
 harbor_installer_url: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-offline-installer-{{ harbor_version }}.tgz"
 
 # Base configuration
-harbor_install_dir: "/opt/harbor-installer"  # Where Harbor installer is extracted
-harbor_data_dir: "/opt/harbor/data"  # Where Harbor stores data
-harbor_log_dir: "/opt/harbor/logs"   # Where Harbor stores logs
+harbor_install_dir: "/opt/infrastructure/harbor/installer"  # Where Harbor installer is extracted
+harbor_data_dir: "/opt/infrastructure/harbor/data"  # Where Harbor stores data
+harbor_log_dir: "/opt/infrastructure/harbor/logs"   # Where Harbor stores logs
 
 # Network configuration
 harbor_http_port: 8082

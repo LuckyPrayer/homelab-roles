@@ -157,14 +157,14 @@
         label: "{{ item.path | basename }}"
       when: item.path | basename != 'komodo'  # Don't symlink komodo itself
 
-    - name: Check if monitoring stack exists at /opt/monitoring
+    - name: Check if monitoring stack exists at {{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}
       ansible.builtin.stat:
-        path: /opt/monitoring/docker-compose.yml
+        path: "{{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}/docker-compose.yml"
       register: monitoring_stack_exists
 
-    - name: Create symlink for monitoring stack (/opt/monitoring)
+    - name: Create symlink for monitoring stack
       ansible.builtin.file:
-        src: /opt/monitoring
+        src: "{{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}"
         dest: /etc/komodo/stacks/monitoring
         state: link
         force: yes
@@ -976,7 +976,7 @@
           ATLAS_HOST={{ backup_atlas_host | default('') }}
           ATLAS_USER={{ backup_atlas_user | default('backupuser') }}
           ATLAS_SSH_KEY={{ backup_atlas_ssh_key_path | default('/root/.ssh/atlas_backup') }}
-          ATLAS_BACKUP_DIR={{ backup_atlas_backup_dir | default('/opt/backrest/backups') }}
+          ATLAS_BACKUP_DIR={{ backup_atlas_backup_dir | default('/opt/infrastructure/backrest/backups') }}
 
           # Backblaze B2 Configuration (native restic backend)
           B2_ACCOUNT_ID={{ b2_account_id_result.stdout | default('') }}
@@ -1223,7 +1223,7 @@
           ATLAS_HOST={{ backup_atlas_host | default('') }}
           ATLAS_USER={{ backup_atlas_user | default('backupuser') }}
           ATLAS_SSH_KEY={{ backup_atlas_ssh_key_path | default('/root/.ssh/atlas_backup') }}
-          ATLAS_BACKUP_DIR={{ backup_atlas_backup_dir | default('/opt/backrest/backups') }}
+          ATLAS_BACKUP_DIR={{ backup_atlas_backup_dir | default('/opt/infrastructure/backrest/backups') }}
 
           # Backblaze B2 Configuration (native restic backend)
           B2_ACCOUNT_ID={{ b2_account_id_result.stdout | default('') }}

@@ -26,8 +26,8 @@ services:
       VIRTUAL_HOST: "pihole.{{ inventory_hostname }}"
       WEBTHEME: "default-dark"
     volumes:
-      - /opt/pihole/etc-pihole:/etc/pihole
-      - /opt/pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+      - {{ pihole_base_dir }}/etc-pihole:/etc/pihole
+      - {{ pihole_base_dir }}/etc-dnsmasq.d:/etc/dnsmasq.d
     restart: unless-stopped
     cap_add:
       - NET_ADMIN

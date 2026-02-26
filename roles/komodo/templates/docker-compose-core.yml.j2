@@ -89,7 +89,7 @@ services:
       # Mount stacks directory for Komodo to see Ansible-deployed containers
       - {{ stacks_base_dir | default('/opt/stacks') }}:{{ stacks_base_dir | default('/opt/stacks') }}:ro
       # Mount monitoring directory (separate from stacks)
-      - /opt/monitoring:/opt/monitoring:ro
+      - {{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}:{{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}:ro
       # Mount repos directory for cloned repositories
       - /etc/komodo/repos:/etc/komodo/repos
     environment:

@@ -11,11 +11,11 @@
     group: root
   loop:
     - /opt/stacks
-    - /opt/stacks/glances
+    - "{{ glances_base_dir }}"
 
 - name: Deploy Glances docker-compose configuration
   ansible.builtin.copy:
-    dest: /opt/stacks/glances/docker-compose.yml
+    dest: "{{ glances_base_dir }}/docker-compose.yml"
     mode: '0644'
     owner: root
     group: root
@@ -51,7 +51,7 @@
 
 - name: Start Glances container
   ansible.builtin.shell: |
-    cd /opt/stacks/glances
+    cd {{ glances_base_dir }}
     docker compose up -d
   register: glances_start
   changed_when: "'Started' in glances_start.stderr or 'Created' in glances_start.stderr"

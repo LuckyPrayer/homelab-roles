@@ -7,7 +7,7 @@
 traefik_proxy_image: "traefik:2.11"
 
 # Installation directory
-traefik_proxy_base_dir: "/opt/traefik-proxy"
+traefik_proxy_base_dir: "/opt/infrastructure/traefik-proxy"
 
 # Traefik configuration
 traefik_proxy_email: "admin@{{ base_domain }}"

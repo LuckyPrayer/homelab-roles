@@ -43,7 +43,7 @@ backup_discord_webhook: ""
 backup_atlas_host: ""
 backup_atlas_user: "backupuser"
 backup_atlas_ssh_key_path: "/root/.ssh/atlas_backup"
-backup_atlas_backup_dir: "/opt/backrest/backups"
+backup_atlas_backup_dir: "/opt/infrastructure/backrest/backups"
 
 # ============================================================================
 # Restore configuration

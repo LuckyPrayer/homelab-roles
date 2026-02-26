@@ -5,7 +5,7 @@ docs_server_port: 8080
 docs_server_container_name: homelab-docs
 docs_server_image_name: homelab-docs
 docs_server_image_tag: latest
-docs_server_base_dir: /opt/homelab-docs
+docs_server_base_dir: /opt/infrastructure/docs-server
 
 # Source documentation location (on Ansible controller)
 # This should point to the homelab-docs submodule/repo
