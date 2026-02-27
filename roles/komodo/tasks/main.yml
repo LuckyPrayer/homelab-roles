@@ -620,6 +620,97 @@
         - komodo_sync_update is defined
         - komodo_sync_update is not skipped
 
+    # ------------------------------------------------------------------
+    # Render ResourceSync TOML before running sync
+    # ------------------------------------------------------------------
+    - name: Create Komodo resource sync directory
+      ansible.builtin.file:
+        path: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/resources/homelab"
+        state: directory
+        owner: docker-svc
+        group: docker
+        mode: '0750'
+
+    # Read homelab-apps manifest so ResourceSync can register app stacks
+    - name: Check if homelab-apps manifest exists locally
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../../homelab-apps/manifest.yml"
+      delegate_to: localhost
+      become: false
+      register: manifest_file
+
+    - name: Read homelab-apps manifest
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/../../homelab-apps/manifest.yml"
+      delegate_to: localhost
+      become: false
+      register: manifest_raw
+      when: manifest_file.stat.exists
+
+    - name: Parse homelab-apps manifest
+      ansible.builtin.set_fact:
+        homelab_manifest: "{{ manifest_raw.content | b64decode | from_yaml }}"
+      when: manifest_file.stat.exists
+
+    - name: Find apps with docker-compose.yml in homelab-apps
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/../../homelab-apps"
+        patterns: "docker-compose.yml"
+        recurse: true
+        depth: 2
+        file_type: file
+      delegate_to: localhost
+      become: false
+      register: compose_files_found
+      when: manifest_file.stat.exists
+
+    - name: Build list of deployable app names
+      ansible.builtin.set_fact:
+        komodo_deployable_apps: "{{ compose_files_found.files | default([]) | map(attribute='path') | map('dirname') | map('basename') | list }}"
+      when: manifest_file.stat.exists
+
+    - name: Resolve app stacks per host from manifest
+      ansible.builtin.set_fact:
+        _komodo_app_stacks_json: >-
+          {% set result = {} %}
+          {% if homelab_manifest is defined and homelab_manifest.hosts is defined %}
+          {% for host_name, host_conf in homelab_manifest.hosts.items() %}
+          {% set profile_apps = [] %}
+          {% for profile_name in host_conf.profiles | default([]) %}
+          {% if homelab_manifest.profiles[profile_name] is defined %}
+          {% set _ = profile_apps.extend(homelab_manifest.profiles[profile_name].apps | default([])) %}
+          {% endif %}
+          {% endfor %}
+          {% set all_apps = (profile_apps + (host_conf.apps | default([]))) | unique | difference(host_conf.exclude | default([])) | intersect(komodo_deployable_apps | default([])) %}
+          {% set _ = result.update({host_name: all_apps | list}) %}
+          {% endfor %}
+          {% endif %}
+          {{ result | to_json }}
+      when: homelab_manifest is defined
+
+    - name: Parse app stacks into dict
+      ansible.builtin.set_fact:
+        komodo_app_stacks: "{{ _komodo_app_stacks_json | trim | from_json }}"
+      when: _komodo_app_stacks_json is defined
+
+    - name: Set empty app stacks if manifest not found
+      ansible.builtin.set_fact:
+        komodo_app_stacks: {}
+      when: homelab_manifest is not defined
+
+    - name: Display resolved app stacks per host
+      ansible.builtin.debug:
+        msg: "{{ komodo_app_stacks }}"
+
+    - name: Template Komodo resource sync configuration
+      ansible.builtin.template:
+        src: komodo-resources.toml.j2
+        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/resources/homelab/homelab.toml"
+        owner: docker-svc
+        group: docker
+        mode: '0640'
+      register: komodo_resources_config
+
     - name: Run ResourceSync to import resources
       ansible.builtin.uri:
         url: "http://localhost:9120/execute"
@@ -852,96 +943,6 @@
       when:
         - komodo_login is succeeded
         - komodo_auto_restore_minecraft | default(false)
-
-    - name: Create Komodo resource sync directory
-      ansible.builtin.file:
-        path: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/resources/homelab"
-        state: directory
-        owner: docker-svc
-        group: docker
-        mode: '0750'
-
-    # ------------------------------------------------------------------
-    # Read homelab-apps manifest so ResourceSync can register app stacks
-    # ------------------------------------------------------------------
-    - name: Check if homelab-apps manifest exists locally
-      ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../../homelab-apps/manifest.yml"
-      delegate_to: localhost
-      become: false
-      register: manifest_file
-
-    - name: Read homelab-apps manifest
-      ansible.builtin.slurp:
-        src: "{{ playbook_dir }}/../../homelab-apps/manifest.yml"
-      delegate_to: localhost
-      become: false
-      register: manifest_raw
-      when: manifest_file.stat.exists
-
-    - name: Parse homelab-apps manifest
-      ansible.builtin.set_fact:
-        homelab_manifest: "{{ manifest_raw.content | b64decode | from_yaml }}"
-      when: manifest_file.stat.exists
-
-    - name: Find apps with docker-compose.yml in homelab-apps
-      ansible.builtin.find:
-        paths: "{{ playbook_dir }}/../../homelab-apps"
-        patterns: "docker-compose.yml"
-        recurse: true
-        depth: 2
-        file_type: file
-      delegate_to: localhost
-      become: false
-      register: compose_files_found
-      when: manifest_file.stat.exists
-
-    - name: Build list of deployable app names
-      ansible.builtin.set_fact:
-        komodo_deployable_apps: "{{ compose_files_found.files | default([]) | map(attribute='path') | map('dirname') | map('basename') | list }}"
-      when: manifest_file.stat.exists
-
-    - name: Resolve app stacks per host from manifest
-      ansible.builtin.set_fact:
-        _komodo_app_stacks_json: >-
-          {% set result = {} %}
-          {% if homelab_manifest is defined and homelab_manifest.hosts is defined %}
-          {% for host_name, host_conf in homelab_manifest.hosts.items() %}
-          {% set profile_apps = [] %}
-          {% for profile_name in host_conf.profiles | default([]) %}
-          {% if homelab_manifest.profiles[profile_name] is defined %}
-          {% set _ = profile_apps.extend(homelab_manifest.profiles[profile_name].apps | default([])) %}
-          {% endif %}
-          {% endfor %}
-          {% set all_apps = (profile_apps + (host_conf.apps | default([]))) | unique | difference(host_conf.exclude | default([])) | intersect(komodo_deployable_apps | default([])) %}
-          {% set _ = result.update({host_name: all_apps | list}) %}
-          {% endfor %}
-          {% endif %}
-          {{ result | to_json }}
-      when: homelab_manifest is defined
-
-    - name: Parse app stacks into dict
-      ansible.builtin.set_fact:
-        komodo_app_stacks: "{{ _komodo_app_stacks_json | trim | from_json }}"
-      when: _komodo_app_stacks_json is defined
-
-    - name: Set empty app stacks if manifest not found
-      ansible.builtin.set_fact:
-        komodo_app_stacks: {}
-      when: homelab_manifest is not defined
-
-    - name: Display resolved app stacks per host
-      ansible.builtin.debug:
-        msg: "{{ komodo_app_stacks }}"
-
-    - name: Template Komodo resource sync configuration
-      ansible.builtin.template:
-        src: komodo-resources.toml.j2
-        dest: "{{ stacks_base_dir | default('/opt/stacks') }}/komodo/resources/homelab/homelab.toml"
-        owner: docker-svc
-        group: docker
-        mode: '0640'
-      register: komodo_resources_config
 
     - name: Create backup scripts directory (Core)
       ansible.builtin.file:
