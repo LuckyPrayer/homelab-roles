@@ -632,29 +632,45 @@
         mode: '0750'
 
     # Read homelab-apps manifest so ResourceSync can register app stacks
+    - name: Locate homelab-apps manifest
+      ansible.builtin.set_fact:
+        _homelab_apps_dir: "{{ lookup('first_found', dict(files=['manifest.yml'], paths=[
+          playbook_dir + '/../homelab-apps',
+          playbook_dir + '/../../homelab-apps',
+          playbook_dir + '/../../../homelab-apps',
+          playbook_dir + '/../../../../homelab-apps'
+        ]), errors='ignore') | default('') | dirname }}"
+      delegate_to: localhost
+      become: false
+
     - name: Check if homelab-apps manifest exists locally
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../../homelab-apps/manifest.yml"
+        path: "{{ _homelab_apps_dir }}/manifest.yml"
       delegate_to: localhost
       become: false
       register: manifest_file
+      when: _homelab_apps_dir | length > 0
 
     - name: Read homelab-apps manifest
       ansible.builtin.slurp:
-        src: "{{ playbook_dir }}/../../homelab-apps/manifest.yml"
+        src: "{{ _homelab_apps_dir }}/manifest.yml"
       delegate_to: localhost
       become: false
       register: manifest_raw
-      when: manifest_file.stat.exists
+      when:
+        - _homelab_apps_dir | length > 0
+        - manifest_file.stat.exists | default(false)
 
     - name: Parse homelab-apps manifest
       ansible.builtin.set_fact:
         homelab_manifest: "{{ manifest_raw.content | b64decode | from_yaml }}"
-      when: manifest_file.stat.exists
+      when:
+        - manifest_raw is not skipped
+        - manifest_raw is succeeded
 
     - name: Find apps with docker-compose.yml in homelab-apps
       ansible.builtin.find:
-        paths: "{{ playbook_dir }}/../../homelab-apps"
+        paths: "{{ _homelab_apps_dir }}"
         patterns: "docker-compose.yml"
         recurse: true
         depth: 2
@@ -662,12 +678,16 @@
       delegate_to: localhost
       become: false
       register: compose_files_found
-      when: manifest_file.stat.exists
+      when:
+        - _homelab_apps_dir | length > 0
+        - manifest_file.stat.exists | default(false)
 
     - name: Build list of deployable app names
       ansible.builtin.set_fact:
         komodo_deployable_apps: "{{ compose_files_found.files | default([]) | map(attribute='path') | map('dirname') | map('basename') | list }}"
-      when: manifest_file.stat.exists
+      when:
+        - compose_files_found is not skipped
+        - compose_files_found is succeeded
 
     - name: Resolve app stacks per host from manifest
       ansible.builtin.set_fact:
