@@ -127,7 +127,11 @@
 # SYMLINKS FOR KOMODO STACK ACCESS
 # ============================================================================
 # Komodo expects stacks in /etc/komodo/stacks/ but Ansible deploys to /opt/stacks/
-# Create symlinks so Komodo can find the Ansible-managed compose files
+# Create symlinks so Komodo can find the Ansible-managed compose files.
+# Only link directories that:
+#   - Contain a docker-compose.yml (are actual deployable stacks)
+#   - Are NOT backup snapshots (.old. directories)
+#   - Are NOT the komodo stack itself (managed separately)
 - name: Create Komodo stacks symlinks
   when: komodo_mode in ['core', 'periphery']
   block:
@@ -139,23 +143,56 @@
         group: docker
         mode: '0755'
 
-    - name: Get list of deployed stacks
+    - name: Find valid stacks (directories with docker-compose.yml)
       ansible.builtin.find:
         paths: "{{ stacks_base_dir | default('/opt/stacks') }}"
-        file_type: directory
-        recurse: no
-      register: deployed_stacks
+        patterns: "docker-compose.yml,docker-compose.yaml"
+        file_type: file
+        recurse: yes
+        depth: 2
+      register: stack_compose_files
 
-    - name: Create symlinks from /etc/komodo/stacks to /opt/stacks
+    - name: Build list of valid stack directories
+      ansible.builtin.set_fact:
+        valid_stacks: >-
+          {{ stack_compose_files.files
+             | map(attribute='path')
+             | map('dirname')
+             | select('match', '^.*/[^.][^/]*$')
+             | reject('match', '.*\.old\.')
+             | reject('search', '/komodo$')
+             | list }}
+
+    - name: Show stacks to symlink
+      ansible.builtin.debug:
+        msg: "{{ valid_stacks | map('basename') | sort | list }}"
+
+    - name: Remove stale symlinks from /etc/komodo/stacks
+      ansible.builtin.shell: >-
+        find /etc/komodo/stacks -maxdepth 1 -type l | while read link; do
+          target=$(readlink -f "$link" 2>/dev/null);
+          if [ ! -d "$target" ] || [ ! -f "$target/docker-compose.yml" -a ! -f "$target/docker-compose.yaml" ]; then
+            rm -f "$link";
+            echo "Removed stale: $(basename $link)";
+          fi;
+        done
+      register: stale_cleanup
+      changed_when: stale_cleanup.stdout | length > 0
+
+    - name: Show removed stale symlinks
+      ansible.builtin.debug:
+        msg: "{{ stale_cleanup.stdout_lines }}"
+      when: stale_cleanup.stdout | length > 0
+
+    - name: Create symlinks from /etc/komodo/stacks to valid stacks
       ansible.builtin.file:
-        src: "{{ item.path }}"
-        dest: "/etc/komodo/stacks/{{ item.path | basename }}"
+        src: "{{ item }}"
+        dest: "/etc/komodo/stacks/{{ item | basename }}"
         state: link
         force: yes
-      loop: "{{ deployed_stacks.files }}"
+      loop: "{{ valid_stacks }}"
       loop_control:
-        label: "{{ item.path | basename }}"
-      when: item.path | basename != 'komodo'  # Don't symlink komodo itself
+        label: "{{ item | basename }}"
 
     - name: Check if monitoring stack exists at {{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}
       ansible.builtin.stat:
