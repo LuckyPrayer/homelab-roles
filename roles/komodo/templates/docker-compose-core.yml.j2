@@ -88,6 +88,8 @@ services:
       - {{ stacks_base_dir | default('/opt/stacks') }}/komodo/periphery-config/config.toml:/config/config.toml:ro
       # Mount stacks directory for Komodo to see Ansible-deployed containers
       - {{ stacks_base_dir | default('/opt/stacks') }}:{{ stacks_base_dir | default('/opt/stacks') }}:ro
+      # Mount apps directory so Komodo can follow symlinks from /opt/stacks/<app> → /opt/apps/<app>
+      - {{ homelab_apps_path | default('/opt/apps') }}:{{ homelab_apps_path | default('/opt/apps') }}:ro
       # Mount monitoring directory (separate from stacks)
       - {{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}:{{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}:ro
       # Mount repos directory for cloned repositories

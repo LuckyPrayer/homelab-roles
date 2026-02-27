@@ -81,7 +81,7 @@ file_paths = ["docker-compose.yml"]
 # =============================================================================
 [[procedure]]
 name = "deploy-all-{{ env | default('dev') }}"
-description = "Deploy all infrastructure stacks (apps deployed via homelab-apps role)"
+description = "Deploy all infrastructure and application stacks"
 tags = ["{{ env | default('dev') }}", "deployment"]
 
 [[procedure.config.stage]]
@@ -98,12 +98,26 @@ executions = [
 {% endif %}
 ]
 
+{% if komodo_app_stacks is defined %}
+[[procedure.config.stage]]
+name = "Deploy Applications"
+executions = [
+{% for host_name, apps in komodo_app_stacks.items() %}
+{% if host_name in groups['docker_hosts'] | default([]) %}
+{% for app_name in apps | sort %}
+  { execution.type = "DeployStack", execution.params.stack = "{{ app_name }}-{{ host_name }}" },
+{% endfor %}
+{% endif %}
+{% endfor %}
+]
+{% endif %}
+
 # =============================================================================
 # PROCEDURES - Maintenance
 # =============================================================================
 [[procedure]]
 name = "restart-all-{{ env | default('dev') }}"
-description = "Restart all stacks"
+description = "Restart all infrastructure and application stacks"
 tags = ["{{ env | default('dev') }}", "maintenance"]
 
 [[procedure.config.stage]]
@@ -119,6 +133,20 @@ executions = [
   { execution.type = "RestartStack", execution.params.stack = "monitoring-{{ env | default('dev') }}" },
 {% endif %}
 ]
+
+{% if komodo_app_stacks is defined %}
+[[procedure.config.stage]]
+name = "Restart Applications"
+executions = [
+{% for host_name, apps in komodo_app_stacks.items() %}
+{% if host_name in groups['docker_hosts'] | default([]) %}
+{% for app_name in apps | sort %}
+  { execution.type = "RestartStack", execution.params.stack = "{{ app_name }}-{{ host_name }}" },
+{% endfor %}
+{% endif %}
+{% endfor %}
+]
+{% endif %}
 
 # =============================================================================
 # PROCEDURES - Restore from B2 Backups (Disaster Recovery)
@@ -139,43 +167,44 @@ executions = [
 # =============================================================================
 
 # =============================================================================
-# GIT-BASED APPLICATION STACKS (Managed via homelab-apps repository)
+# STACKS - Application Stacks (from homelab-apps manifest)
 # =============================================================================
-# Applications are fully decoupled from Ansible infrastructure.
+# Dynamically generated from manifest.yml host-to-app mappings.
+# Apps are deployed by the homelab-apps role to /opt/apps/<app>/ with
+# symlinks at /opt/stacks/<app>. Secrets are in .env files (not infisical run).
+# Komodo can start/stop/restart these stacks directly.
+{% if komodo_app_stacks is defined %}
+{% for host_name, apps in komodo_app_stacks.items() %}
+{% if host_name in groups['docker_hosts'] | default([]) %}
+{% for app_name in apps | sort %}
+
+[[stack]]
+name = "{{ app_name }}-{{ host_name }}"
+description = "{{ app_name | replace('-', ' ') | title }} (managed by homelab-apps)"
+tags = ["{{ hostvars[host_name].env | default(env | default('dev')) }}", "application", "homelab-apps"]
+[stack.config]
+server = "{{ host_name }}"
+run_directory = "/opt/stacks/{{ app_name }}"
+file_paths = ["docker-compose.yml"]
+env_file_path = ".env"
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# =============================================================================
+# HOMELAB-APPS REFERENCE
+# =============================================================================
+# Applications above are managed via the homelab-apps Git repository.
 # - All app definitions live in homelab-apps/manifest.yml
 # - Each app has its own config.yml with backup/restore settings
 # - Deploy apps via: ./scripts/run-playbook.sh --env=dev deploy-all --tags homelab-apps
 # - Or manually: ssh <host> "/opt/apps/scripts/deploy.sh <app>"
 #
 # To add a new application:
-#   1. Create folder in homelab-apps repo (e.g., uptime-kuma/)
+#   1. Create folder in homelab-apps repo (e.g., my-app/)
 #   2. Add docker-compose.yml with ${VAR} for secrets
 #   3. Add config.yml with backup/secrets configuration
 #   4. Add to manifest.yml host profiles or apps list
 #   5. Push to Git and run deploy playbook
-# =============================================================================
-
-# Git-managed apps - deployed via homelab-apps role reading manifest.yml
-# Stacks shown here for Komodo visibility/management only
-{% if 'orion-dev' in groups['docker_hosts'] | default([]) or 'orion-prod' in groups['docker_hosts'] | default([]) %}
-
-[[stack]]
-name = "homelab-apps-{{ env | default('dev') }}"
-description = "Git-managed applications (n8n, mealie, vaultwarden, minecraft, homepage, etc.)"
-tags = ["{{ env | default('dev') }}", "applications", "git-managed"]
-[stack.config]
-server = "orion-{{ env | default('dev') }}"
-project_name = "homelab-apps"
-git_provider = "github.com"
-git_account = "{{ komodo_github_account | default('LuckyPrayer') }}"
-repo = "LuckyPrayer/homelab-apps"
-branch = "main"
-run_directory = "."
-file_paths = []
-environment = """
-ENV={{ env | default('dev') }}
-BASE_DOMAIN={{ base_domain | default('thebozic.com') }}
-TZ={{ timezone | default('America/Toronto') }}
-"""
-
-{% endif %}
+#   6. Re-deploy komodo role to register the new stack in ResourceSync
