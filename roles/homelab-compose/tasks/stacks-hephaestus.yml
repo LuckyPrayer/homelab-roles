@@ -73,6 +73,28 @@
   when: glances_enabled | default(true)
 
 # =============================================================================
+# HOMEPAGE STACK (Infrastructure Dashboard)
+# =============================================================================
+- name: Create homepage stack directory structure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: docker-svc
+    group: docker
+    mode: '0750'
+  loop:
+    - "{{ stacks_base_dir }}/homepage"
+    - "{{ stacks_base_dir }}/homepage/config"
+
+- name: Template homepage docker-compose
+  ansible.builtin.template:
+    src: stacks/homepage/docker-compose.yml.j2
+    dest: "{{ stacks_base_dir }}/homepage/docker-compose.yml"
+    owner: docker-svc
+    group: docker
+    mode: '0640'
+
+# =============================================================================
 # START STACKS
 # =============================================================================
 - name: Build list of hephaestus stacks
@@ -80,6 +102,7 @@
     hephaestus_stacks:
       - traefik
       - glances
+      - homepage
 
 - name: Start all stacks
   ansible.builtin.shell: |

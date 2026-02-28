@@ -1,0 +1,29 @@
+version: "3.9"
+
+# Homepage - Infrastructure Dashboard for {{ inventory_hostname }}
+# Deployed via Ansible homelab-compose role (not homelab-apps)
+# Config files managed by homepage-config role
+
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ={{ timezone | default('America/Toronto') }}
+      - HOMEPAGE_ALLOWED_HOSTS=infra.{{ env | default('dev') }}.{{ base_domain | default('thebozic.com') }},home.{{ env | default('dev') }}.{{ base_domain | default('thebozic.com') }},localhost:3001
+    volumes:
+      - ./config:/app/config
+    ports:
+      - "3001:3000"
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    name: homelab
+    external: true
