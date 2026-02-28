@@ -40,6 +40,7 @@ deploy = true
 [stack.config]
 server = "hephaestus-{{ env | default('dev') }}"
 project_name = "harbor"
+files_on_host = true
 run_directory = "/opt/infrastructure/harbor"
 file_paths = ["docker-compose.yml"]
 {% endif %}
@@ -56,6 +57,7 @@ deploy = true
 [stack.config]
 server = "orion-{{ env | default('dev') }}"
 project_name = "traefik"
+files_on_host = true
 run_directory = "/opt/stacks/traefik"
 file_paths = ["docker-compose.yml"]
 {% endif %}
@@ -75,6 +77,7 @@ deploy = true
 [stack.config]
 server = "argus-{{ env | default('dev') }}"
 project_name = "monitoring"
+files_on_host = true
 run_directory = "{{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}"
 file_paths = ["docker-compose.yml"]
 {% endif %}
@@ -188,6 +191,7 @@ tags = ["{{ hostvars[host_name].env | default(env | default('dev')) }}", "applic
 [stack.config]
 server = "{{ host_name }}"
 project_name = "{{ app_name }}"
+files_on_host = true
 run_directory = "/opt/stacks/{{ app_name }}"
 file_paths = ["docker-compose.yml"]
 env_file_path = ".env"
