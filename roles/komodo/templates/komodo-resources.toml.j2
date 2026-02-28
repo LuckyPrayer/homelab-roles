@@ -104,8 +104,16 @@ executions = [
 
 [[stack]]
 name = "{{ app_name }}-{{ host_name }}"
+{% if app_name == 'homepage' and 'orion' in host_name %}
+description = "Applications Dashboard (managed by homelab-apps)"
+tags = ["{{ hostvars[host_name].env | default(env | default('dev')) }}", "application", "homelab-apps", "dashboard"]
+{% elif app_name == 'homepage' and 'hephaestus' in host_name %}
+description = "Infrastructure Dashboard (managed by homelab-apps)"
+tags = ["{{ hostvars[host_name].env | default(env | default('dev')) }}", "infrastructure", "homelab-apps", "dashboard"]
+{% else %}
 description = "{{ app_name | replace('-', ' ') | title }} (managed by homelab-apps)"
 tags = ["{{ hostvars[host_name].env | default(env | default('dev')) }}", "application", "homelab-apps"]
+{% endif %}
 [stack.config]
 server = "{{ host_name }}"
 project_name = "{{ app_name }}"
