@@ -29,82 +29,18 @@ enabled = true
 {% endif %}
 
 # =============================================================================
-# STACKS - Harbor Registry (hephaestus)
-# =============================================================================
-{% if 'hephaestus-dev' in groups['docker_hosts'] | default([]) or 'hephaestus-prod' in groups['docker_hosts'] | default([]) %}
-[[stack]]
-name = "harbor-{{ env | default('dev') }}"
-description = "Harbor Container Registry"
-tags = ["{{ env | default('dev') }}", "registry", "infrastructure"]
-deploy = true
-[stack.config]
-server = "hephaestus-{{ env | default('dev') }}"
-project_name = "harbor"
-files_on_host = true
-run_directory = "/opt/infrastructure/harbor"
-file_paths = ["docker-compose.yml"]
-{% endif %}
-
-# =============================================================================
-# STACKS - Orion Infrastructure (Traefik only - apps via homelab-apps)
-# =============================================================================
-{% if 'orion-dev' in groups['docker_hosts'] | default([]) or 'orion-prod' in groups['docker_hosts'] | default([]) %}
-[[stack]]
-name = "traefik-{{ env | default('dev') }}"
-description = "Traefik Reverse Proxy"
-tags = ["{{ env | default('dev') }}", "proxy", "infrastructure"]
-deploy = true
-[stack.config]
-server = "orion-{{ env | default('dev') }}"
-project_name = "traefik"
-files_on_host = true
-run_directory = "/opt/stacks/traefik"
-file_paths = ["docker-compose.yml"]
-{% endif %}
-
-# =============================================================================
-# STACKS - Monitoring (argus)
-# =============================================================================
-# NOTE: The monitoring stack (Prometheus, Grafana, Loki, etc.) is deployed as a
-# single stack at {{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }} by the monitoring-stack role.
-# It's not separated into individual stacks like other services.
-{% if 'argus-dev' in groups['docker_hosts'] | default([]) or 'argus-prod' in groups['docker_hosts'] | default([]) %}
-[[stack]]
-name = "monitoring-{{ env | default('dev') }}"
-description = "Monitoring Stack (Prometheus, Grafana, Loki, Alertmanager)"
-tags = ["{{ env | default('dev') }}", "monitoring", "infrastructure"]
-deploy = true
-[stack.config]
-server = "argus-{{ env | default('dev') }}"
-project_name = "monitoring"
-files_on_host = true
-run_directory = "{{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}"
-file_paths = ["docker-compose.yml"]
-{% endif %}
-
-# =============================================================================
 # PROCEDURES - Deployment
 # =============================================================================
-[[procedure]]
-name = "deploy-all-{{ env | default('dev') }}"
-description = "Deploy all infrastructure and application stacks"
-tags = ["{{ env | default('dev') }}", "deployment"]
-
-[[procedure.config.stage]]
-name = "Deploy Infrastructure"
-executions = [
-{% if 'hephaestus-dev' in groups['docker_hosts'] | default([]) or 'hephaestus-prod' in groups['docker_hosts'] | default([]) %}
-  { execution.type = "DeployStack", execution.params.stack = "harbor-{{ env | default('dev') }}" },
-{% endif %}
-{% if 'orion-dev' in groups['docker_hosts'] | default([]) or 'orion-prod' in groups['docker_hosts'] | default([]) %}
-  { execution.type = "DeployStack", execution.params.stack = "traefik-{{ env | default('dev') }}" },
-{% endif %}
-{% if 'argus-dev' in groups['docker_hosts'] | default([]) or 'argus-prod' in groups['docker_hosts'] | default([]) %}
-  { execution.type = "DeployStack", execution.params.stack = "monitoring-{{ env | default('dev') }}" },
-{% endif %}
-]
+# NOTE: Infrastructure stacks (harbor, traefik, monitoring) are managed
+# exclusively by Ansible and are NOT registered in Komodo.
+# Komodo only manages application stacks from homelab-apps.
 
 {% if komodo_app_stacks is defined %}
+[[procedure]]
+name = "deploy-all-{{ env | default('dev') }}"
+description = "Deploy all application stacks"
+tags = ["{{ env | default('dev') }}", "deployment"]
+
 [[procedure.config.stage]]
 name = "Deploy Applications"
 executions = [
@@ -121,26 +57,12 @@ executions = [
 # =============================================================================
 # PROCEDURES - Maintenance
 # =============================================================================
+{% if komodo_app_stacks is defined %}
 [[procedure]]
 name = "restart-all-{{ env | default('dev') }}"
-description = "Restart all infrastructure and application stacks"
+description = "Restart all application stacks"
 tags = ["{{ env | default('dev') }}", "maintenance"]
 
-[[procedure.config.stage]]
-name = "Restart Infrastructure"
-executions = [
-{% if 'hephaestus-dev' in groups['docker_hosts'] | default([]) or 'hephaestus-prod' in groups['docker_hosts'] | default([]) %}
-  { execution.type = "RestartStack", execution.params.stack = "harbor-{{ env | default('dev') }}" },
-{% endif %}
-{% if 'orion-dev' in groups['docker_hosts'] | default([]) or 'orion-prod' in groups['docker_hosts'] | default([]) %}
-  { execution.type = "RestartStack", execution.params.stack = "traefik-{{ env | default('dev') }}" },
-{% endif %}
-{% if 'argus-dev' in groups['docker_hosts'] | default([]) or 'argus-prod' in groups['docker_hosts'] | default([]) %}
-  { execution.type = "RestartStack", execution.params.stack = "monitoring-{{ env | default('dev') }}" },
-{% endif %}
-]
-
-{% if komodo_app_stacks is defined %}
 [[procedure.config.stage]]
 name = "Restart Applications"
 executions = [
@@ -155,21 +77,17 @@ executions = [
 {% endif %}
 
 # =============================================================================
-# PROCEDURES - Restore from B2 Backups (Disaster Recovery)
+# BACKUP/RESTORE REFERENCE
 # =============================================================================
-# NOTE: Backup/restore commands must be run manually via SSH or through
-# Komodo Actions (defined separately). The RunCommand execution type does not
-# exist in Komodo ResourceSync.
+# Backups are handled via systemd timers on each host, not via Komodo.
 #
 # Manual restore examples:
 #   ssh orion-dev "/opt/scripts/komodo-restore.sh n8n latest"
 #   ssh orion-dev "/opt/scripts/komodo-restore.sh mealie latest"
 #   ssh orion-dev "/opt/scripts/komodo-restore.sh vaultwarden latest"
-#   ssh hephaestus-dev "/opt/scripts/komodo-restore.sh harbor latest"
 #
 # Manual backup examples:
 #   ssh orion-dev "/opt/scripts/komodo-backup.sh all full"
-#   ssh hephaestus-dev "/opt/scripts/komodo-backup.sh harbor full"
 # =============================================================================
 
 # =============================================================================
