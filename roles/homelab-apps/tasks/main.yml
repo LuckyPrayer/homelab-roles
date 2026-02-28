@@ -13,6 +13,7 @@
 - name: Set default variables
   ansible.builtin.set_fact:
     homelab_apps_path: "{{ homelab_apps_path | default('/opt/apps') }}"
+    homelab_stacks_path: "{{ homelab_stacks_path | default('/opt/stacks') }}"
     homelab_apps_branch: "{{ homelab_apps_branch | default('main') }}"
 
 # =============================================================================
@@ -110,9 +111,65 @@
   loop: "{{ final_apps | difference(deployable_apps) }}"
   when: final_apps | difference(deployable_apps) | length > 0
 
+# =============================================================================
+# Enforce allowed_hosts from each app's config.yml
+# =============================================================================
+
+- name: Read config.yml for each deployable app
+  ansible.builtin.slurp:
+    src: "{{ homelab_apps_path }}/{{ item }}/config.yml"
+  loop: "{{ deployable_apps }}"
+  register: app_configs_raw
+  failed_when: false
+
+- name: Parse app configs and check allowed_hosts
+  ansible.builtin.set_fact:
+    _app_configs: >-
+      {%- set result = {} -%}
+      {%- for item in app_configs_raw.results -%}
+        {%- if item.content is defined -%}
+          {%- set cfg = item.content | b64decode | from_yaml -%}
+          {%- set _ = result.update({item.item: cfg}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ result }}
+
+- name: Warn about manifest/allowed_hosts mismatches
+  ansible.builtin.debug:
+    msg: >-
+      ⚠ MISMATCH: App '{{ item }}' is assigned to {{ inventory_hostname }} in manifest.yml
+      but allowed_hosts in config.yml is {{ _app_configs[item].allowed_hosts }}.
+      Skipping deployment. Update allowed_hosts or manifest.yml to resolve.
+  loop: "{{ deployable_apps }}"
+  when:
+    - _app_configs[item] is defined
+    - _app_configs[item].allowed_hosts is defined
+    - _app_configs[item].allowed_hosts | length > 0
+    - inventory_hostname not in _app_configs[item].allowed_hosts
+
+- name: Filter apps by allowed_hosts
+  ansible.builtin.set_fact:
+    deployable_apps: >-
+      {%- set allowed = [] -%}
+      {%- for app in deployable_apps -%}
+        {%- if _app_configs[app] is defined
+            and _app_configs[app].allowed_hosts is defined
+            and _app_configs[app].allowed_hosts | length > 0
+            and inventory_hostname not in _app_configs[app].allowed_hosts -%}
+          {# skip - host not in allowed_hosts #}
+        {%- else -%}
+          {%- set _ = allowed.append(app) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ allowed }}
+
+- name: Display final deployable apps (after allowed_hosts filtering)
+  ansible.builtin.debug:
+    msg: "Apps to deploy on {{ inventory_hostname }} (allowed_hosts verified): {{ deployable_apps | join(', ') }}"
+
 - name: Create stacks directory
   ansible.builtin.file:
-    path: /opt/stacks
+    path: "{{ homelab_stacks_path | default('/opt/stacks') }}"
     state: directory
     mode: '0755'
 

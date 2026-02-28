@@ -19,7 +19,7 @@ set -euo pipefail
 # =============================================================================
 HOST="{{ inventory_hostname }}"
 ENV="{{ host_config.env | default('dev') }}"
-HOMELAB_APPS_PATH="{{ homelab_apps_path }}"
+HOMELAB_APPS_PATH="{{ homelab_stacks_path | default('/opt/stacks') }}"
 
 # Apps assigned to this host via manifest.yml
 MANIFEST_APPS=({% for app in deployable_apps %}"{{ app }}" {% endfor %})

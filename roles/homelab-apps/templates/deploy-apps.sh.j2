@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-HOMELAB_APPS_PATH="{{ homelab_apps_path }}"
+HOMELAB_APPS_PATH="{{ homelab_stacks_path | default('/opt/stacks') }}"
 HOST="{{ inventory_hostname }}"
 ENV="{{ host_config.env | default('dev') }}"
 BASE_DOMAIN="{{ manifest.settings.defaults.BASE_DOMAIN | default('thebozic.com') }}"
