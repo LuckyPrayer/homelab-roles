@@ -39,6 +39,7 @@ tags = ["{{ env | default('dev') }}", "registry", "infrastructure"]
 deploy = true
 [stack.config]
 server = "hephaestus-{{ env | default('dev') }}"
+project_name = "harbor"
 run_directory = "/opt/infrastructure/harbor"
 file_paths = ["docker-compose.yml"]
 {% endif %}
@@ -54,6 +55,7 @@ tags = ["{{ env | default('dev') }}", "proxy", "infrastructure"]
 deploy = true
 [stack.config]
 server = "orion-{{ env | default('dev') }}"
+project_name = "traefik"
 run_directory = "/opt/stacks/traefik"
 file_paths = ["docker-compose.yml"]
 {% endif %}
@@ -72,6 +74,7 @@ tags = ["{{ env | default('dev') }}", "monitoring", "infrastructure"]
 deploy = true
 [stack.config]
 server = "argus-{{ env | default('dev') }}"
+project_name = "monitoring"
 run_directory = "{{ monitoring_base_dir | default('/opt/infrastructure/monitoring') }}"
 file_paths = ["docker-compose.yml"]
 {% endif %}
@@ -184,6 +187,7 @@ description = "{{ app_name | replace('-', ' ') | title }} (managed by homelab-ap
 tags = ["{{ hostvars[host_name].env | default(env | default('dev')) }}", "application", "homelab-apps"]
 [stack.config]
 server = "{{ host_name }}"
+project_name = "{{ app_name }}"
 run_directory = "/opt/stacks/{{ app_name }}"
 file_paths = ["docker-compose.yml"]
 env_file_path = ".env"
