@@ -14,7 +14,7 @@ name = "{{ inventory_hostname }}"
 description = "Komodo Core Host - {{ env | default('dev') }} environment"
 tags = ["{{ env | default('dev') }}", "core", "docker"]
 [server.config]
-address = "http://localhost:{{ komodo_periphery_port | default(8120) }}"
+address = "http://komodo-periphery:{{ komodo_periphery_port | default(8120) }}"
 enabled = true
 
 {% for host in groups['docker_hosts'] | default([]) if host != inventory_hostname and hostvars[host].komodo_mode | default('disabled') == 'periphery' %}
