@@ -94,6 +94,18 @@
     group: docker
     mode: '0640'
 
+- name: Create homepage .env file
+  ansible.builtin.copy:
+    dest: "{{ stacks_base_dir }}/homepage/.env"
+    content: |
+      # Homepage - no secrets required
+      TZ={{ timezone | default('America/Toronto') }}
+      ENV={{ env | default('dev') }}
+      BASE_DOMAIN={{ base_domain | default('thebozic.com') }}
+    owner: docker-svc
+    group: docker
+    mode: '0600'
+
 # =============================================================================
 # START STACKS
 # =============================================================================
