@@ -1,0 +1,49 @@
+---
+# Home Assistant OS Role - Default Variables
+#
+# This role deploys Home Assistant OS (HAOS) as a dedicated Proxmox VM.
+# HAOS is a purpose-built operating system that includes the Home Assistant
+# Supervisor, providing add-ons, backups, and automatic updates out of the box.
+
+# Feature toggle
+homeassistant_enabled: true
+
+# HAOS image version and download
+# Find releases at: https://github.com/home-assistant/operating-system/releases
+haos_version: "14.2"
+haos_image_url: "https://github.com/home-assistant/operating-system/releases/download/{{ haos_version }}/haos_ova-{{ haos_version }}.qcow2.xz"
+haos_image_checksum_url: "https://github.com/home-assistant/operating-system/releases/download/{{ haos_version }}/haos_ova-{{ haos_version }}.qcow2.xz.sha256"
+haos_download_dir: "/tmp/haos"
+
+# Proxmox VM configuration
+haos_vm_name: "{{ inventory_hostname }}"
+haos_vm_id: ""  # Auto-assign if empty; set to a fixed ID if desired
+haos_vm_onboot: true
+haos_vm_machine_type: "q35"
+haos_vm_bios: "ovmf"  # UEFI boot required for HAOS
+haos_vm_cpu_type: "host"
+
+# VM resources
+haos_vm_cpu_cores: "{{ vm_cpu_cores | default(2) }}"
+haos_vm_memory_mb: "{{ vm_memory_mb | default(4096) }}"
+haos_vm_disk_gb: "{{ vm_disk_gb | default(40) }}"
+
+# Storage
+haos_proxmox_storage: "{{ proxmox_storage | default('local-lvm') }}"
+haos_proxmox_efi_storage: "{{ proxmox_storage | default('local-lvm') }}"
+
+# Network
+haos_vm_bridge: "{{ vm_bridge | default('vmbr0') }}"
+haos_vm_vlan: "{{ vm_vlan | default('') }}"
+haos_vm_ip: "{{ vm_ip | default('') }}"
+haos_vm_gateway: "{{ vm_net_gateway | default('') }}"
+haos_vm_net_prefix: "{{ vm_net_prefix | default(24) }}"
+
+# DNS servers for the VM (comma-separated)
+haos_vm_dns: "{{ vm_dns | default('1.1.1.1,8.8.8.8') }}"
+
+# Home Assistant web UI port (default on HAOS)
+homeassistant_port: 8123
+
+# Proxmox node
+proxmox_node: proxmoxve

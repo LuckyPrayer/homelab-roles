@@ -255,6 +255,37 @@
       changed_when: false
       ignore_errors: yes  # May fail if netfilter-persistent is not installed
 
+- name: Configure cross-VLAN allow rules (FORWARD chain)
+  when:
+    - router_enable_firewall | bool
+    - router_cross_vlan_allows | default([]) | length > 0
+  block:
+    - name: Allow cross-VLAN traffic to specific hosts
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: "{{ item.in_interface }}"
+        out_interface: "{{ item.out_interface }}"
+        destination: "{{ item.destination }}"
+        protocol: "{{ item.protocol | default(omit) }}"
+        destination_port: "{{ item.port | default(omit) }}"
+        ctstate: NEW,ESTABLISHED,RELATED
+        jump: ACCEPT
+        comment: "{{ item.name }}"
+      loop: "{{ router_cross_vlan_allows }}"
+      notify: save iptables
+
+    - name: Allow return traffic for cross-VLAN rules
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: "{{ item.out_interface }}"
+        out_interface: "{{ item.in_interface }}"
+        source: "{{ item.destination }}"
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+        comment: "Return traffic for {{ item.name }}"
+      loop: "{{ router_cross_vlan_allows }}"
+      notify: save iptables
+
 - name: Configure VLAN isolation rules (FORWARD chain)
   when: 
     - router_enable_firewall | bool
@@ -335,6 +366,11 @@
   ansible.builtin.import_tasks: glances.yml
   when: router_enable_glances | default(true) | bool
   tags: [glances, monitoring]
+
+- name: Configure Avahi mDNS reflector
+  ansible.builtin.import_tasks: avahi.yml
+  when: router_enable_avahi | default(false) | bool
+  tags: [avahi, mdns]
 
 - name: Configure Cloudflare Dynamic DNS
   ansible.builtin.import_tasks: cloudflare-ddns.yml

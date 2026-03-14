@@ -1,0 +1,416 @@
+---
+# Home Assistant OS Role - Deploy HAOS as a Proxmox VM
+#
+# Deploys Home Assistant Operating System as a dedicated VM on Proxmox:
+# - Downloads the official HAOS qcow2 image
+# - Creates a UEFI VM with the imported disk
+# - Configures resources (CPU, memory, disk)
+# - Starts the VM and waits for the web UI
+#
+# This role runs on the Proxmox host, not on the HAOS VM itself.
+
+- name: Deploy Home Assistant OS VM
+  when: homeassistant_enabled | bool
+  block:
+    # ── Proxmox API Credentials ──────────────────────────────────────
+    - name: Retrieve PROXMOX_TOKEN_ID from Infisical
+      ansible.builtin.shell: |
+        infisical secrets get PROXMOX_TOKEN_ID --path="/users/ansible/proxmox" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env=prod
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+      register: proxmox_token_id
+      delegate_to: localhost
+      run_once: true
+      become: false
+      changed_when: false
+      failed_when: proxmox_token_id.stdout == ""
+
+    - name: Retrieve PROXMOX_TOKEN_SECRET from Infisical
+      ansible.builtin.shell: |
+        infisical secrets get PROXMOX_TOKEN_SECRET --path="/users/ansible/proxmox" --plain --silent --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" --env=prod
+      environment:
+        INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+      register: proxmox_token_secret
+      delegate_to: localhost
+      run_once: true
+      become: false
+      changed_when: false
+      failed_when: proxmox_token_secret.stdout == ""
+      no_log: true
+
+    # ── Python Environment ───────────────────────────────────────────
+    - name: Set virtual environment path for proxmoxer
+      ansible.builtin.set_fact:
+        venv_path: "{{ playbook_dir }}/../.venv"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Check if virtual environment exists
+      ansible.builtin.stat:
+        path: "{{ venv_path }}/bin/pip"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: venv_check
+
+    - name: Create virtual environment if not exists
+      ansible.builtin.command:
+        cmd: python3 -m venv {{ venv_path }}
+        creates: "{{ venv_path }}/bin/activate"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: not venv_check.stat.exists
+
+    - name: Ensure proxmoxer library is installed on control node
+      ansible.builtin.pip:
+        name:
+          - proxmoxer
+          - requests
+        state: present
+        virtualenv: "{{ venv_path }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    # ── Set Proxmox SSH Key Path ─────────────────────────────────────
+    - name: Set Proxmox SSH key path
+      ansible.builtin.set_fact:
+        proxmox_ssh_key_path: "{{ playbook_dir }}/../.ssh-keys/proxmox-ci"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Get Proxmox host IP
+      ansible.builtin.set_fact:
+        proxmox_host_ip: "{{ hostvars[groups['proxmox'][0]]['ansible_host'] }}"
+
+    # ── Check if VM Already Exists ───────────────────────────────────
+    - name: Check if VM '{{ haos_vm_name }}' already exists
+      ansible.builtin.shell: |
+        {{ venv_path }}/bin/python3 << 'EOF'
+        from proxmoxer import ProxmoxAPI
+        proxmox = ProxmoxAPI(
+            "{{ proxmox_host_ip }}",
+            user="ansible@pve",
+            token_name="{{ proxmox_token_id.stdout }}",
+            token_value="{{ proxmox_token_secret.stdout }}",
+            verify_ssl=False
+        )
+        for vm in proxmox.cluster.resources.get(type='vm'):
+            if vm.get('name') == "{{ haos_vm_name }}":
+                print(vm.get('vmid'))
+                exit(0)
+        print("")
+        exit(0)
+        EOF
+      delegate_to: localhost
+      become: false
+      register: existing_vm_check
+      changed_when: false
+      no_log: true
+
+    - name: Set VM exists fact
+      ansible.builtin.set_fact:
+        vm_already_exists: "{{ existing_vm_check.stdout | trim | length > 0 }}"
+        existing_vmid: "{{ existing_vm_check.stdout | trim }}"
+
+    - name: Display VM status
+      ansible.builtin.debug:
+        msg: "VM '{{ haos_vm_name }}' {{ 'already exists with VMID ' + existing_vmid if vm_already_exists else 'does not exist — will create from HAOS image' }}"
+
+    # ── Download & Import HAOS Image (new VM only) ───────────────────
+    - name: Create HAOS download directory on Proxmox host
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "mkdir -p {{ haos_download_dir }}"
+      delegate_to: localhost
+      become: false
+      when: not vm_already_exists
+      changed_when: true
+
+    - name: Check if HAOS image already downloaded
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "test -f {{ haos_download_dir }}/haos_ova-{{ haos_version }}.qcow2 && echo 'exists' || echo 'missing'"
+      delegate_to: localhost
+      become: false
+      register: haos_image_check
+      changed_when: false
+      when: not vm_already_exists
+
+    - name: Download HAOS image on Proxmox host
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "cd {{ haos_download_dir }} &&
+           wget -q -O haos_ova-{{ haos_version }}.qcow2.xz '{{ haos_image_url }}' &&
+           xz -d -f haos_ova-{{ haos_version }}.qcow2.xz"
+      delegate_to: localhost
+      become: false
+      when:
+        - not vm_already_exists
+        - haos_image_check.stdout | trim == 'missing'
+      changed_when: true
+
+    # ── Get Next Available VMID ──────────────────────────────────────
+    - name: Get next available VMID
+      ansible.builtin.shell: |
+        {{ venv_path }}/bin/python3 << 'EOF'
+        from proxmoxer import ProxmoxAPI
+        proxmox = ProxmoxAPI(
+            "{{ proxmox_host_ip }}",
+            user="ansible@pve",
+            token_name="{{ proxmox_token_id.stdout }}",
+            token_value="{{ proxmox_token_secret.stdout }}",
+            verify_ssl=False
+        )
+        used_ids = set()
+        for vm in proxmox.cluster.resources.get(type='vm'):
+            used_ids.add(int(vm.get('vmid', 0)))
+        # Start from 100, find first free
+        vmid = 100
+        while vmid in used_ids:
+            vmid += 1
+        print(vmid)
+        EOF
+      delegate_to: localhost
+      become: false
+      register: next_vmid
+      changed_when: false
+      no_log: true
+      when:
+        - not vm_already_exists
+        - haos_vm_id | string == ''
+
+    - name: Set target VMID
+      ansible.builtin.set_fact:
+        target_vmid: >-
+          {%- if vm_already_exists -%}
+            {{ existing_vmid }}
+          {%- elif haos_vm_id | string != '' -%}
+            {{ haos_vm_id }}
+          {%- else -%}
+            {{ next_vmid.stdout | trim }}
+          {%- endif -%}
+
+    # ── Create VM & Import Disk (new VM only) ────────────────────────
+    - name: Create HAOS VM on Proxmox
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm create {{ target_vmid }}
+          --name {{ haos_vm_name }}
+          --machine {{ haos_vm_machine_type }}
+          --bios {{ haos_vm_bios }}
+          --cores {{ haos_vm_cpu_cores }}
+          --memory {{ haos_vm_memory_mb }}
+          --cpu {{ haos_vm_cpu_type }}
+          --net0 virtio,bridge={{ haos_vm_bridge }}{{ ',tag=' + (haos_vm_vlan | string) if haos_vm_vlan | string | length > 0 else '' }}
+          --ostype l26
+          --agent 1
+          --onboot {{ '1' if haos_vm_onboot else '0' }}
+          --scsihw virtio-scsi-pci"
+      delegate_to: localhost
+      become: false
+      when: not vm_already_exists
+      changed_when: true
+
+    - name: Add EFI disk for UEFI boot
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm set {{ target_vmid }}
+          --efidisk0 {{ haos_proxmox_efi_storage }}:1,format=raw,efitype=4m,pre-enrolled-keys=0"
+      delegate_to: localhost
+      become: false
+      when: not vm_already_exists
+      changed_when: true
+
+    - name: Import HAOS disk image into Proxmox storage
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm importdisk {{ target_vmid }}
+          {{ haos_download_dir }}/haos_ova-{{ haos_version }}.qcow2
+          {{ haos_proxmox_storage }}"
+      delegate_to: localhost
+      become: false
+      when: not vm_already_exists
+      changed_when: true
+      register: import_result
+
+    - name: Attach imported disk as scsi0
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm set {{ target_vmid }}
+          --scsi0 {{ haos_proxmox_storage }}:vm-{{ target_vmid }}-disk-1
+          --boot order=scsi0"
+      delegate_to: localhost
+      become: false
+      when: not vm_already_exists
+      changed_when: true
+
+    - name: Resize HAOS disk to {{ haos_vm_disk_gb }}G
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm disk resize {{ target_vmid }} scsi0 {{ haos_vm_disk_gb }}G"
+      delegate_to: localhost
+      become: false
+      when: not vm_already_exists
+      changed_when: true
+
+    # ── Configure USB Passthrough (optional) ─────────────────────────
+    - name: Configure USB passthrough for Zigbee/Z-Wave
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm set {{ target_vmid }} --{{ item.key }} {{ item.value }}"
+      delegate_to: localhost
+      become: false
+      loop: "{{ haos_usb_devices | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: haos_usb_devices is defined and haos_usb_devices | length > 0
+      changed_when: true
+
+    # ── Start VM ─────────────────────────────────────────────────────
+    - name: Start HAOS VM
+      community.general.proxmox_kvm:
+        api_user: ansible@pve
+        api_host: "{{ proxmox_host_ip }}"
+        api_token_id: "{{ proxmox_token_id.stdout }}"
+        api_token_secret: "{{ proxmox_token_secret.stdout }}"
+        node: "{{ proxmox_node }}"
+        vmid: "{{ target_vmid }}"
+        validate_certs: false
+        state: started
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ venv_path }}/bin/python"
+
+    # ── Configure Static IP via QEMU Guest Agent ────────────────────
+    # HAOS does not support cloud-init. We use the QEMU guest agent
+    # and nmcli to configure a static IP inside the running VM.
+    - name: Wait for QEMU guest agent to be ready
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm guest exec {{ target_vmid }} -- cat /etc/hostname"
+      delegate_to: localhost
+      become: false
+      register: guest_agent_check
+      until: guest_agent_check.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+
+    - name: Check current network configuration in VM
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm guest exec {{ target_vmid }} -- nmcli -t -f ipv4.method con show 'Wired connection 1'"
+      delegate_to: localhost
+      become: false
+      register: current_net_method
+      changed_when: false
+
+    - name: Configure static IP via NetworkManager
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm guest exec {{ target_vmid }} -- nmcli con mod 'Wired connection 1'
+          ipv4.addresses {{ haos_vm_ip }}/{{ haos_vm_net_prefix }}
+          ipv4.gateway {{ haos_vm_gateway }}
+          ipv4.dns '{{ haos_vm_dns | default('1.1.1.1,8.8.8.8') }}'
+          ipv4.method manual"
+      delegate_to: localhost
+      become: false
+      when:
+        - haos_vm_ip | string | length > 0
+        - "'manual' not in (current_net_method.stdout | default(''))"
+      changed_when: true
+
+    - name: Activate network connection with static IP
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no
+          root@{{ proxmox_host_ip }}
+          "qm guest exec {{ target_vmid }} -- nmcli con up 'Wired connection 1'"
+      delegate_to: localhost
+      become: false
+      when:
+        - haos_vm_ip | string | length > 0
+        - "'manual' not in (current_net_method.stdout | default(''))"
+      changed_when: true
+
+    - name: Wait for network to stabilize after IP change
+      ansible.builtin.pause:
+        seconds: 5
+      when:
+        - haos_vm_ip | string | length > 0
+        - "'manual' not in (current_net_method.stdout | default(''))"
+
+    # ── Health Check ─────────────────────────────────────────────────
+    # The control node may not have direct access to the VM's VLAN.
+    # Use the QEMU guest agent to check HA from inside the VM.
+    - name: Wait for Home Assistant to start inside VM
+      ansible.builtin.shell: |
+        ssh -i {{ proxmox_ssh_key_path }} -o StrictHostKeyChecking=no \
+          root@{{ proxmox_host_ip }} \
+          "qm guest exec {{ target_vmid }} -- curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 http://127.0.0.1:{{ homeassistant_port }}" \
+          2>/dev/null | grep -o '"out-data"[^}]*' | grep -oE '(200|401)'
+      delegate_to: localhost
+      become: false
+      register: ha_health
+      until: ha_health.rc == 0
+      retries: 60
+      delay: 10
+      failed_when: false
+      changed_when: false
+      when: haos_vm_ip | string | length > 0
+
+    # ── Deployment Summary ───────────────────────────────────────────
+    - name: Display HAOS deployment info
+      ansible.builtin.debug:
+        msg:
+          - "╔════════════════════════════════════════════════════════════════╗"
+          - "║      Home Assistant OS Deployed Successfully!                 ║"
+          - "╚════════════════════════════════════════════════════════════════╝"
+          - ""
+          - "  VM Name:   {{ haos_vm_name }}"
+          - "  VMID:      {{ target_vmid }}"
+          - "  HAOS:      v{{ haos_version }}"
+          - "  CPU:       {{ haos_vm_cpu_cores }} cores"
+          - "  Memory:    {{ haos_vm_memory_mb }}MB"
+          - "  Disk:      {{ haos_vm_disk_gb }}GB"
+          - "  Network:   {{ haos_vm_bridge }}{{ ' (VLAN ' + haos_vm_vlan | string + ')' if haos_vm_vlan | string | length > 0 else '' }}"
+          - "  Health:    {{ 'OK' if ha_health.rc | default(1) == 0 else 'PENDING (HAOS may still be initializing)' }}"
+          - ""
+          - "{% if haos_vm_ip | string | length > 0 %}  Access at: http://{{ haos_vm_ip }}:{{ homeassistant_port }}{% else %}  IP will be assigned via DHCP — check Proxmox console{% endif %}"
+          - ""
+          - "  NOTE: On first boot, HAOS will download and install Home Assistant."
+          - "  This can take 10-20 minutes. Monitor progress in the Proxmox console."
+
+- name: Skip Home Assistant (disabled)
+  when: not (homeassistant_enabled | bool)
+  ansible.builtin.debug:
+    msg: "Home Assistant is disabled (homeassistant_enabled={{ homeassistant_enabled }}). Skipping."

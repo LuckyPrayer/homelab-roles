@@ -1,0 +1,18 @@
+---
+# Home Assistant OS handlers
+# HAOS manages itself — restarts are done via the Proxmox API
+
+- name: Restart homeassistant
+  community.general.proxmox_kvm:
+    api_user: ansible@pve
+    api_host: "{{ proxmox_host_ip }}"
+    api_token_id: "{{ proxmox_token_id.stdout }}"
+    api_token_secret: "{{ proxmox_token_secret.stdout }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ target_vmid }}"
+    validate_certs: false
+    state: restarted
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ venv_path }}/bin/python"

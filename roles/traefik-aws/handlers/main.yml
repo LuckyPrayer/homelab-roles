@@ -7,3 +7,8 @@
     state: present
     restarted: true
   listen: Restart traefik-aws
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  become: yes

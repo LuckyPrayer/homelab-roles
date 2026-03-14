@@ -214,6 +214,36 @@
     - item.stdout | length > 0
   become: true
 
+# Fetch and store SSH private keys (for services like n8n that SSH back to the host)
+- name: Fetch SSH private key from Infisical for service users
+  ansible.builtin.shell: |
+    infisical secrets get SSH_PRIVATE_KEY \
+      --path="{{ item.ssh_key_infisical_path }}" \
+      --plain --silent \
+      --projectId="{{ lookup('env', 'INFISICAL_PROJECT_ID') }}" \
+      --env="{{ infisical_env_slug | default('dev') }}"
+  register: service_user_ssh_private_keys
+  loop: "{{ service_users | selectattr('ssh_key_infisical_path', 'defined') | list }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Store SSH private key for service users
+  ansible.builtin.copy:
+    content: "{{ item.stdout }}\n"
+    dest: "{{ item.item.home }}/.ssh/id_ed25519"
+    owner: "{{ item.item.name }}"
+    group: "{{ item.item.name }}"
+    mode: '0600'
+  loop: "{{ service_user_ssh_private_keys.results | default([]) }}"
+  when:
+    - item.rc == 0
+    - item.stdout | length > 0
+  become: true
+  no_log: true
+
 - name: Create ansible user (if enabled)
   ansible.builtin.user:
     name: "{{ custom_ansible_user_name }}"
@@ -267,6 +297,19 @@
     mode: '0440'
     validate: 'visudo -cf %s'
   when: configure_sudoers | bool
+  become: true
+
+- name: Configure sudoers for n8n automation user
+  ansible.builtin.template:
+    src: sudoers-n8nuser.j2
+    dest: "{{ sudoers_dir }}/n8nuser"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  when:
+    - configure_sudoers | bool
+    - service_users | selectattr('name', 'equalto', 'n8nuser') | list | length > 0
   become: true
 
 - name: Configure SSH security settings

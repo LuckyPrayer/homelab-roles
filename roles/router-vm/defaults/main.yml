@@ -104,6 +104,17 @@ router_vlans: []
   #   subnet: 192.168.20.0/24
   #   gateway: 192.168.20.1
 
+# Cross-VLAN allow rules (FORWARD chain)
+# Allow specific management network devices to reach VLAN hosts
+# (e.g., Chromecast → Music Assistant for media streaming)
+router_cross_vlan_allows: []
+  # Example:
+  # - name: "Chromecast to Music Assistant"
+  #   in_interface: eth0       # Source interface (management network)
+  #   out_interface: ens19     # Destination interface (VLAN 10)
+  #   destination: 192.168.10.30  # Target host
+  #   # protocol and port are optional — omit to allow all protocols
+
 # VLAN isolation rules (FORWARD chain)
 # Block traffic between specific VLANs for security
 router_vlan_isolation_rules: []
@@ -121,6 +132,14 @@ router_vlan_isolation_rules: []
 # Glances system monitoring (for Homepage widgets)
 router_enable_glances: true
 router_glances_allowed_networks: "192.168.0.0/16"  # Default: all private networks
+
+# Avahi mDNS reflector (for cross-VLAN service discovery)
+# Enables mDNS reflection between interfaces so devices like
+# Chromecast, AirPlay speakers, etc. can be discovered across VLANs.
+router_enable_avahi: false
+avahi_reflect_interfaces: []
+  # Example: ['eth0', 'ens19']  — reflect mDNS between management and VLAN 10
+avahi_reflect_ipv: false  # Reflect between IPv4 and IPv6
 
 # Service directories
 pihole_base_dir: "/opt/infrastructure/pihole"

@@ -1,0 +1,13 @@
+# Sudoers configuration for n8nuser
+# Provides minimum required privileges for n8n workflow automation
+# n8nuser SSHes into the host to run docker exec commands (e.g., rcon-cli for Minecraft)
+
+Defaults:n8nuser !requiretty
+
+# Docker exec only - run commands inside specific containers
+n8nuser ALL=(root) NOPASSWD: /usr/bin/docker exec minecraft-ll rcon-cli *
+n8nuser ALL=(root) NOPASSWD: /usr/bin/docker exec minecraft-mh rcon-cli *
+
+# Read-only container inspection (for health checks)
+n8nuser ALL=(root) NOPASSWD: /usr/bin/docker ps *
+n8nuser ALL=(root) NOPASSWD: /usr/bin/docker inspect *

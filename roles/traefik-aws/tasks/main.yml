@@ -21,6 +21,137 @@
   when: traefik_enabled | default(false)
   tags: [traefik-aws, traefik]
 
+# ============================================================================
+# CERTIFICATE BACKUP/RESTORE SETUP
+# Fetch B2 credentials and restore certificates from backup to avoid rate limits
+# ============================================================================
+- name: Fetch B2_ACCOUNT_ID from Infisical for certificate backup
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get B2_ACCOUNT_ID \
+      --projectId {{ traefik_aws_infisical_project_id }} \
+      --env {{ traefik_aws_infisical_env }} \
+      --path {{ traefik_aws_backup_infisical_path }} \
+      --plain
+  register: b2_account_id_result
+  changed_when: false
+  no_log: true
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+    - traefik_aws_infisical_token is defined
+    - traefik_aws_infisical_token | length > 0
+  ignore_errors: true
+  tags: [traefik-aws, traefik]
+
+- name: Fetch B2_ACCOUNT_KEY from Infisical for certificate backup
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get B2_ACCOUNT_KEY \
+      --projectId {{ traefik_aws_infisical_project_id }} \
+      --env {{ traefik_aws_infisical_env }} \
+      --path {{ traefik_aws_backup_infisical_path }} \
+      --plain
+  register: b2_account_key_result
+  changed_when: false
+  no_log: true
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+    - traefik_aws_infisical_token is defined
+    - traefik_aws_infisical_token | length > 0
+  ignore_errors: true
+  tags: [traefik-aws, traefik]
+
+- name: Fetch B2_BUCKET from Infisical for certificate backup
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get B2_BUCKET \
+      --projectId {{ traefik_aws_infisical_project_id }} \
+      --env {{ traefik_aws_infisical_env }} \
+      --path {{ traefik_aws_backup_infisical_path }} \
+      --plain
+  register: b2_bucket_result
+  changed_when: false
+  no_log: true
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+    - traefik_aws_infisical_token is defined
+    - traefik_aws_infisical_token | length > 0
+  ignore_errors: true
+  tags: [traefik-aws, traefik]
+
+- name: Fetch RESTIC_PASSWORD from Infisical for certificate backup
+  ansible.builtin.shell: |
+    export INFISICAL_TOKEN=$(cat /root/.infisical-token)
+    infisical secrets get RESTIC_PASSWORD \
+      --projectId {{ traefik_aws_infisical_project_id }} \
+      --env {{ traefik_aws_infisical_env }} \
+      --path {{ traefik_aws_backup_infisical_path }} \
+      --plain
+  register: restic_password_result
+  changed_when: false
+  no_log: true
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+    - traefik_aws_infisical_token is defined
+    - traefik_aws_infisical_token | length > 0
+  ignore_errors: true
+  tags: [traefik-aws, traefik]
+
+- name: Set backup credentials from Infisical
+  ansible.builtin.set_fact:
+    traefik_aws_b2_account_id: "{{ b2_account_id_result.stdout | default('') }}"
+    traefik_aws_b2_account_key: "{{ b2_account_key_result.stdout | default('') }}"
+    traefik_aws_b2_bucket: "{{ b2_bucket_result.stdout | default('homelab-backups') }}"
+    traefik_aws_restic_password: "{{ restic_password_result.stdout | default('') }}"
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+    - b2_account_id_result is defined
+    - b2_account_id_result is not skipped
+  no_log: true
+  tags: [traefik-aws, traefik]
+
+- name: Install restic for certificate backups
+  ansible.builtin.apt:
+    name: restic
+    state: present
+  become: yes
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+  tags: [traefik-aws, traefik]
+
+- name: Deploy certificate backup environment file
+  ansible.builtin.template:
+    src: backup.env.j2
+    dest: "{{ traefik_aws_base_dir }}/backup.env"
+    mode: '0600'
+    owner: root
+    group: root
+  become: yes
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+    - traefik_aws_b2_account_id | default('') | length > 0
+  tags: [traefik-aws, traefik]
+
+- name: Deploy certificate backup script
+  ansible.builtin.template:
+    src: cert-backup.sh.j2
+    dest: "{{ traefik_aws_base_dir }}/cert-backup.sh"
+    mode: '0755'
+    owner: root
+    group: root
+  become: yes
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+  tags: [traefik-aws, traefik]
+
 - name: Create acme.json for Let's Encrypt certificates
   ansible.builtin.file:
     path: "{{ traefik_aws_base_dir }}/acme.json"
@@ -28,7 +159,31 @@
     owner: root
     group: root
     mode: "0600"
+    modification_time: preserve
+    access_time: preserve
   when: traefik_enabled | default(false)
+  tags: [traefik-aws, traefik]
+
+- name: Restore certificates from B2 backup (if available)
+  ansible.builtin.command:
+    cmd: "{{ traefik_aws_base_dir }}/cert-backup.sh restore"
+  become: yes
+  register: cert_restore_result
+  changed_when: "'restored successfully' in cert_restore_result.stdout"
+  failed_when: false
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+    - traefik_aws_b2_account_id | default('') | length > 0
+  tags: [traefik-aws, traefik]
+
+- name: Display certificate restore result
+  ansible.builtin.debug:
+    msg: "{{ cert_restore_result.stdout_lines | default(['No restore attempted']) }}"
+  when:
+    - traefik_enabled | default(false)
+    - cert_restore_result is defined
+    - cert_restore_result.stdout_lines is defined
   tags: [traefik-aws, traefik]
 
 - name: Check if Infisical CLI is installed
@@ -169,6 +324,78 @@
     - traefik_compose is changed or traefik_compose is succeeded
   tags: [traefik-aws, traefik]
 
+# ============================================================================
+# CERTIFICATE BACKUP TIMER
+# Set up systemd timer for daily certificate backups
+# ============================================================================
+- name: Deploy certificate backup systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/traefik-cert-backup.service
+    content: |
+      [Unit]
+      Description=Backup Traefik Let's Encrypt certificates to B2
+      After=network.target
+
+      [Service]
+      Type=oneshot
+      ExecStart={{ traefik_aws_base_dir }}/cert-backup.sh backup
+      User=root
+      StandardOutput=journal
+      StandardError=journal
+    mode: '0644'
+  become: yes
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+  tags: [traefik-aws, traefik]
+
+- name: Deploy certificate backup systemd timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/traefik-cert-backup.timer
+    content: |
+      [Unit]
+      Description=Daily Traefik certificate backup timer
+
+      [Timer]
+      OnCalendar=*-*-* 04:00:00
+      Persistent=true
+      RandomizedDelaySec=1800
+
+      [Install]
+      WantedBy=timers.target
+    mode: '0644'
+  become: yes
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+  notify: Reload systemd
+  tags: [traefik-aws, traefik]
+
+- name: Enable and start certificate backup timer
+  ansible.builtin.systemd:
+    name: traefik-cert-backup.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  become: yes
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+  tags: [traefik-aws, traefik]
+
+- name: Run initial certificate backup (if certificates exist)
+  ansible.builtin.command:
+    cmd: "{{ traefik_aws_base_dir }}/cert-backup.sh backup"
+  become: yes
+  register: initial_backup_result
+  changed_when: "'Backup complete' in initial_backup_result.stdout"
+  failed_when: false
+  when:
+    - traefik_enabled | default(false)
+    - traefik_aws_cert_backup_enabled | default(true)
+    - traefik_aws_b2_account_id | default('') | length > 0
+  tags: [traefik-aws, traefik]
+
 - name: Display Traefik status
   ansible.builtin.debug:
     msg:
@@ -180,9 +407,10 @@
       - "HTTP Port: {{ traefik_aws_http_port }}"
       - "HTTPS Port: {{ traefik_aws_https_port }}"
       - ""
-      - "Services on this host can use Traefik labels for HTTPS:"
-      - "  - traefik.enable=true"
-      - "  - traefik.http.routers.<name>.rule=Host(`<hostname>`)"
-      - "  - traefik.http.routers.<name>.tls.certresolver={{ traefik_aws_cert_resolver }}"
+      - "Certificate Backup:"
+      - "  - Backup script: {{ traefik_aws_base_dir }}/cert-backup.sh"
+      - "  - Timer: traefik-cert-backup.timer (runs daily at 4 AM)"
+      - "  - Manual backup: {{ traefik_aws_base_dir }}/cert-backup.sh backup"
+      - "  - Manual restore: {{ traefik_aws_base_dir }}/cert-backup.sh restore"
   when: traefik_enabled | default(false)
   tags: [traefik-aws, traefik]

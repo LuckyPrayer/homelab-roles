@@ -1,0 +1,68 @@
+---
+# Avahi mDNS Reflector Tasks
+# Reflects mDNS (multicast DNS) traffic between network interfaces
+# to enable service discovery (Chromecast, AirPlay, etc.) across VLANs.
+#
+# Required when IoT devices and servers are on different subnets.
+
+- name: Install avahi-daemon
+  ansible.builtin.apt:
+    name:
+      - avahi-daemon
+      - avahi-utils
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Deploy avahi-daemon configuration
+  ansible.builtin.template:
+    src: avahi-daemon.conf.j2
+    dest: /etc/avahi/avahi-daemon.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - restart avahi
+
+- name: Disable avahi default mDNS publishing (nsswitch)
+  ansible.builtin.lineinfile:
+    path: /etc/nsswitch.conf
+    regexp: '^hosts:'
+    line: 'hosts:          files dns'
+    backup: yes
+
+- name: Allow mDNS (UDP 5353) on all reflector interfaces
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: udp
+    destination_port: "5353"
+    in_interface: "{{ item }}"
+    jump: ACCEPT
+    comment: "Allow mDNS on {{ item }}"
+  loop: "{{ avahi_reflect_interfaces }}"
+  notify: save iptables
+
+- name: Allow mDNS forwarding between reflector interfaces
+  ansible.builtin.iptables:
+    chain: FORWARD
+    protocol: udp
+    destination_port: "5353"
+    in_interface: "{{ item.0 }}"
+    out_interface: "{{ item.1 }}"
+    jump: ACCEPT
+    comment: "Allow mDNS forward {{ item.0 }} -> {{ item.1 }}"
+  loop: "{{ avahi_reflect_interfaces | product(avahi_reflect_interfaces) | list }}"
+  when: item.0 != item.1
+  notify: save iptables
+
+- name: Enable and start avahi-daemon
+  ansible.builtin.systemd:
+    name: avahi-daemon
+    enabled: yes
+    state: started
+
+- name: Display avahi reflector status
+  ansible.builtin.debug:
+    msg:
+      - "Avahi mDNS reflector configured successfully!"
+      - "Reflecting mDNS between interfaces: {{ avahi_reflect_interfaces | join(', ') }}"

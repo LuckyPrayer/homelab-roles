@@ -12,9 +12,25 @@
   ansible.builtin.set_fact:
     restore_app_config: "{{ restore_app_config_raw.content | b64decode | from_yaml if restore_app_config_raw.content is defined else {} }}"
 
+- name: "{{ app_name }} - Check allowed_hosts for restore"
+  ansible.builtin.set_fact:
+    _restore_host_allowed: >-
+      {{
+        restore_app_config.allowed_hosts is not defined
+        or restore_app_config.allowed_hosts | length == 0
+        or inventory_hostname in restore_app_config.allowed_hosts
+      }}
+
+- name: "{{ app_name }} - Skip restore (host not in allowed_hosts)"
+  ansible.builtin.debug:
+    msg: >-
+      ✗ Skipping restore for {{ app_name }}: {{ inventory_hostname }} is not in
+      allowed_hosts {{ restore_app_config.allowed_hosts | default([]) }}
+  when: not _restore_host_allowed | bool
+
 - name: "{{ app_name }} - Check if restore is enabled for app"
   ansible.builtin.set_fact:
-    app_restore_enabled: "{{ restore_app_config.restore.enabled | default(true) }}"
+    app_restore_enabled: "{{ (restore_app_config.restore.enabled | default(true)) and (_restore_host_allowed | bool) }}"
 
 - name: "{{ app_name }} - Skip restore if disabled"
   ansible.builtin.debug:

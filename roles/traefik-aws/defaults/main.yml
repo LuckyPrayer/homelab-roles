@@ -42,3 +42,16 @@ traefik_aws_container_name: "traefik"
 # Memory limits
 traefik_aws_memory_limit: "256m"
 traefik_aws_memory_reservation: "128m"
+
+# Certificate backup configuration
+# Enable backup/restore of Let's Encrypt certificates to avoid rate limits
+traefik_aws_cert_backup_enabled: true
+
+# B2 backup credentials (fetched from Infisical)
+traefik_aws_b2_account_id: ""
+traefik_aws_b2_account_key: ""
+traefik_aws_b2_bucket: "homelab-backups"
+traefik_aws_restic_password: ""
+
+# Infisical paths for backup secrets
+traefik_aws_backup_infisical_path: "/infrastructure/backup"

@@ -1,0 +1,47 @@
+# Avahi mDNS/DNS-SD Reflector Configuration
+# Managed by Ansible — do not edit manually
+#
+# Reflects mDNS traffic between network interfaces to enable
+# service discovery (e.g., Chromecast, AirPlay) across VLANs.
+
+[server]
+host-name={{ inventory_hostname }}
+use-ipv4=yes
+use-ipv6=yes
+# Only listen on specified interfaces
+allow-interfaces={{ avahi_reflect_interfaces | join(',') }}
+enable-dbus=yes
+# Don't publish the host's own services
+allow-point-to-point=no
+
+[wide-area]
+enable-wide-area=no
+
+[publish]
+publish-addresses=no
+publish-hinfo=no
+publish-workstation=no
+publish-domain=no
+disable-publishing=yes
+
+[reflector]
+enable-reflector=yes
+{% if avahi_reflect_ipv | default(false) %}
+reflect-ipv=yes
+{% else %}
+reflect-ipv=no
+{% endif %}
+{% if avahi_reflect_filters is defined and avahi_reflect_filters | length > 0 %}
+# Only reflect specific service types
+{% for filter in avahi_reflect_filters %}
+reflect-filters={{ filter }}
+{% endfor %}
+{% endif %}
+
+[rlimits]
+rlimit-core=0
+rlimit-data=4194304
+rlimit-fsize=0
+rlimit-nofile=768
+rlimit-stack=4194304
+rlimit-nproc=3

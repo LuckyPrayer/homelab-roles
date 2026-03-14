@@ -45,3 +45,8 @@
   community.docker.docker_compose_v2:
     project_src: "{{ cloudflare_ddns_base_dir }}"
     state: restarted
+
+- name: restart avahi
+  ansible.builtin.systemd:
+    name: avahi-daemon
+    state: restarted

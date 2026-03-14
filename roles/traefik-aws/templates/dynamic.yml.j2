@@ -1,5 +1,6 @@
 # Traefik Dynamic Configuration
-# Additional routers and middlewares
+# Additional routers, middlewares, and tunnel proxy routes
+# Managed by Ansible — do not edit manually
 
 http:
   middlewares:
@@ -19,3 +20,73 @@ http:
       rateLimit:
         average: 100
         burst: 50
+
+{% if traefik_aws_local_routes is defined or traefik_aws_tunnel_routes is defined %}
+  # Proxy routes
+  routers:
+{% for route in traefik_aws_local_routes | default([]) %}
+    # Local route: {{ route.name }}
+    {{ route.name }}-proxy:
+      rule: "Host(`{{ route.domain }}`)"
+      entryPoints:
+        - websecure
+      service: {{ route.name }}-backend
+      middlewares:
+        - security-headers
+      tls:
+        certResolver: {{ traefik_aws_cert_resolver | default('letsencrypt') }}
+{% endfor %}
+{% for route in traefik_aws_tunnel_routes | default([]) %}
+    # Tunnel route: {{ route.name }}
+    {{ route.name }}-proxy:
+      rule: "Host(`{{ route.domain }}`)"
+      entryPoints:
+        - websecure
+      service: {{ route.name }}-backend
+      middlewares:
+        - security-headers
+      tls:
+        certResolver: {{ traefik_aws_cert_resolver | default('letsencrypt') }}
+{% endfor %}
+
+  services:
+{% for route in traefik_aws_local_routes | default([]) %}
+    {{ route.name }}-backend:
+      loadBalancer:
+        servers:
+          - url: "{{ route.backend_url }}"
+        passHostHeader: true
+{% if route.health_check_path is defined %}
+        healthCheck:
+          path: "{{ route.health_check_path }}"
+          interval: "30s"
+          timeout: "15s"
+{% endif %}
+{% endfor %}
+{% for route in traefik_aws_tunnel_routes | default([]) %}
+    {{ route.name }}-backend:
+      loadBalancer:
+        servers:
+          - url: "{{ route.backend_url }}"
+        passHostHeader: true
+{% if route.health_check_path is defined %}
+        healthCheck:
+          path: "{{ route.health_check_path }}"
+          interval: "30s"
+          timeout: "15s"
+{% endif %}
+{% if route.skip_tls_verify | default(false) %}
+        serversTransport: insecure-transport
+{% endif %}
+{% endfor %}
+
+{% if traefik_aws_tunnel_routes | default([]) | selectattr('skip_tls_verify', 'defined') | selectattr('skip_tls_verify') | list | length > 0 %}
+  serversTransports:
+    insecure-transport:
+      insecureSkipVerify: true
+      forwardingTimeouts:
+        dialTimeout: "30s"
+        responseHeaderTimeout: "60s"
+        idleConnTimeout: "90s"
+{% endif %}
+{% endif %}
