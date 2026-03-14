@@ -191,3 +191,11 @@
       - "  docker compose restart  # Restart Semaphore"
       - ""
       - "============================================================"
+
+# ============================================================================
+# Step 8: Configure Semaphore project via API
+# ============================================================================
+
+- name: Configure Semaphore project and templates
+  ansible.builtin.include_tasks: configure.yml
+  when: semaphore_configure | default(true)

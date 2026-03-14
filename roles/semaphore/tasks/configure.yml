@@ -1,0 +1,422 @@
+---
+# Semaphore Project Configuration via API
+#
+# Configures the Semaphore instance with:
+#   - A project for homelab management
+#   - SSH keys for host access
+#   - Git repository for playbooks
+#   - Inventory references (file-based from repo)
+#   - Environment variables
+#   - Task templates for app deployments
+#   - Dashboard views
+#
+# All tasks are idempotent - safe to run multiple times.
+# Requires: Semaphore container healthy and API accessible.
+
+# =============================================================================
+# Fetch additional secrets for project configuration
+# =============================================================================
+
+- name: Fetch SSH private key from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get SEMAPHORE_SSH_PRIVATE_KEY \
+      --path={{ semaphore_infisical_path }} \
+      --env={{ infisical_env_slug }} \
+      --projectId={{ infisical_project_id }} \
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ semaphore_infisical_token }}"
+  register: _sem_ssh_key_result
+  changed_when: false
+  no_log: true
+  delegate_to: localhost
+  become: false
+  failed_when: false
+
+- name: Fetch Git access token from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get SEMAPHORE_GIT_TOKEN \
+      --path={{ semaphore_infisical_path }} \
+      --env={{ infisical_env_slug }} \
+      --projectId={{ infisical_project_id }} \
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ semaphore_infisical_token }}"
+  register: _sem_git_token_result
+  changed_when: false
+  no_log: true
+  delegate_to: localhost
+  become: false
+  failed_when: false
+
+- name: Set configuration secret facts
+  ansible.builtin.set_fact:
+    _semaphore_ssh_private_key: "{{ _sem_ssh_key_result.stdout | default('') }}"
+    _semaphore_git_token: "{{ _sem_git_token_result.stdout | default('') }}"
+  no_log: true
+
+# =============================================================================
+# Authentication
+# =============================================================================
+
+- name: Set Semaphore API base URL
+  ansible.builtin.set_fact:
+    _sem_api: "http://localhost:{{ semaphore_port }}/api"
+
+- name: Authenticate with Semaphore API
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/auth/login"
+    method: POST
+    body_format: json
+    body:
+      auth: "{{ semaphore_admin_user }}"
+      password: "{{ semaphore_admin_password }}"
+    status_code: 204
+  register: _sem_login
+  retries: 3
+  delay: 5
+  until: _sem_login is success
+  no_log: true
+
+- name: Create API token
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/user/tokens"
+    method: POST
+    headers:
+      Cookie: "{{ _sem_login.cookies_string }}"
+      Content-Type: application/json
+      Accept: application/json
+    status_code: [200, 201]
+  register: _sem_token_result
+  no_log: true
+
+- name: Set API authorization headers
+  ansible.builtin.set_fact:
+    _sem_auth:
+      Authorization: "Bearer {{ _sem_token_result.json.id }}"
+      Content-Type: application/json
+      Accept: application/json
+  no_log: true
+
+# =============================================================================
+# Project
+# =============================================================================
+
+- name: List existing projects
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/projects"
+    headers: "{{ _sem_auth }}"
+  register: _sem_projects
+
+- name: Create project '{{ semaphore_project_name }}'
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/projects"
+    method: POST
+    body_format: json
+    body:
+      name: "{{ semaphore_project_name }}"
+      alert: false
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 201]
+  register: _sem_project_new
+  when: _sem_projects.json | selectattr('name', 'equalto', semaphore_project_name) | list | length == 0
+
+- name: Set project ID
+  ansible.builtin.set_fact:
+    _sem_project_id: >-
+      {{ (_sem_projects.json | selectattr('name', 'equalto', semaphore_project_name) | first).id
+         if (_sem_projects.json | selectattr('name', 'equalto', semaphore_project_name) | list | length > 0)
+         else _sem_project_new.json.id }}
+
+# =============================================================================
+# Access Keys
+# =============================================================================
+
+- name: List existing keys
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/keys"
+    headers: "{{ _sem_auth }}"
+  register: _sem_keys
+
+- name: Add SSH key for host access
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/keys"
+    method: POST
+    body_format: json
+    body:
+      name: "{{ semaphore_ssh_key_name }}"
+      type: ssh
+      project_id: "{{ _sem_project_id | int }}"
+      ssh:
+        private_key: "{{ _semaphore_ssh_private_key }}"
+        login: "{{ semaphore_ssh_user }}"
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 201, 204]
+  when:
+    - _semaphore_ssh_private_key | length > 0
+    - _sem_keys.json | selectattr('name', 'equalto', semaphore_ssh_key_name) | list | length == 0
+  no_log: true
+
+- name: Add empty key for local tasks
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/keys"
+    method: POST
+    body_format: json
+    body:
+      name: "none"
+      type: none
+      project_id: "{{ _sem_project_id | int }}"
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 201, 204]
+  when: _sem_keys.json | selectattr('name', 'equalto', 'none') | list | length == 0
+
+- name: Add Git HTTPS key
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/keys"
+    method: POST
+    body_format: json
+    body:
+      name: "{{ semaphore_git_key_name }}"
+      type: login_password
+      project_id: "{{ _sem_project_id | int }}"
+      login_password:
+        login: ""
+        password: "{{ _semaphore_git_token }}"
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 201, 204]
+  when:
+    - semaphore_git_key_type == 'login_password'
+    - _semaphore_git_token | length > 0
+    - _sem_keys.json | selectattr('name', 'equalto', semaphore_git_key_name) | list | length == 0
+  no_log: true
+
+- name: Refresh key list
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/keys"
+    headers: "{{ _sem_auth }}"
+  register: _sem_keys
+
+- name: Build key name-to-ID map
+  ansible.builtin.set_fact:
+    _sem_key_map: "{{ _sem_key_map | default({}) | combine({item.name: item.id}) }}"
+  loop: "{{ _sem_keys.json }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# =============================================================================
+# Repository
+# =============================================================================
+
+- name: List existing repositories
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/repositories"
+    headers: "{{ _sem_auth }}"
+  register: _sem_repos
+
+- name: Add homelab repository
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/repositories"
+    method: POST
+    body_format: json
+    body:
+      name: "{{ semaphore_repo_name }}"
+      project_id: "{{ _sem_project_id | int }}"
+      git_url: "{{ semaphore_repo_url }}"
+      git_branch: "{{ semaphore_repo_branch }}"
+      ssh_key_id: "{{ _sem_key_map[semaphore_git_key_name] | default(_sem_key_map['none']) }}"
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 201, 204]
+  register: _sem_repo_new
+  when: _sem_repos.json | selectattr('name', 'equalto', semaphore_repo_name) | list | length == 0
+
+- name: Refresh repository list
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/repositories"
+    headers: "{{ _sem_auth }}"
+  register: _sem_repos
+
+- name: Set repository ID
+  ansible.builtin.set_fact:
+    _sem_repo_id: "{{ (_sem_repos.json | selectattr('name', 'equalto', semaphore_repo_name) | first).id }}"
+
+# =============================================================================
+# Inventories
+# =============================================================================
+
+- name: List existing inventories
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/inventory"
+    headers: "{{ _sem_auth }}"
+  register: _sem_inventories
+
+- name: Add inventories
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/inventory"
+    method: POST
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      project_id: "{{ _sem_project_id | int }}"
+      type: file
+      inventory: "{{ item.inventory_path }}"
+      ssh_key_id: "{{ _sem_key_map[semaphore_ssh_key_name] | default(_sem_key_map['none']) }}"
+      become_key_id: "{{ _sem_key_map[semaphore_ssh_key_name] | default(_sem_key_map['none']) }}"
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 201, 204]
+  loop: "{{ semaphore_inventories }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _sem_inventories.json | selectattr('name', 'equalto', item.name) | list | length == 0
+
+- name: Refresh inventory list
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/inventory"
+    headers: "{{ _sem_auth }}"
+  register: _sem_inventories
+
+- name: Build inventory name-to-ID map
+  ansible.builtin.set_fact:
+    _sem_inv_map: "{{ _sem_inv_map | default({}) | combine({item.name: item.id}) }}"
+  loop: "{{ _sem_inventories.json }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# =============================================================================
+# Environment
+# =============================================================================
+
+- name: List existing environments
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/environment"
+    headers: "{{ _sem_auth }}"
+  register: _sem_envs
+
+- name: Add default environment
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/environment"
+    method: POST
+    body_format: json
+    body:
+      name: "{{ semaphore_env_name }}"
+      project_id: "{{ _sem_project_id | int }}"
+      json: "{{ semaphore_env_vars | to_json }}"
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 201, 204]
+  when: _sem_envs.json | selectattr('name', 'equalto', semaphore_env_name) | list | length == 0
+
+- name: Refresh environment list
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/environment"
+    headers: "{{ _sem_auth }}"
+  register: _sem_envs
+
+- name: Build environment name-to-ID map
+  ansible.builtin.set_fact:
+    _sem_env_map: "{{ _sem_env_map | default({}) | combine({item.name: item.id}) }}"
+  loop: "{{ _sem_envs.json }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# =============================================================================
+# Views
+# =============================================================================
+
+- name: List existing views
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/views"
+    headers: "{{ _sem_auth }}"
+  register: _sem_views
+
+- name: Create views
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/views"
+    method: POST
+    body_format: json
+    body:
+      title: "{{ item }}"
+      project_id: "{{ _sem_project_id | int }}"
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 201, 204]
+  loop: "{{ semaphore_views }}"
+  when: _sem_views.json | selectattr('title', 'equalto', item) | list | length == 0
+
+- name: Refresh view list
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/views"
+    headers: "{{ _sem_auth }}"
+  register: _sem_views
+
+- name: Build view title-to-ID map
+  ansible.builtin.set_fact:
+    _sem_view_map: "{{ _sem_view_map | default({}) | combine({item.title: item.id}) }}"
+  loop: "{{ _sem_views.json }}"
+  loop_control:
+    label: "{{ item.title }}"
+
+# =============================================================================
+# Task Templates
+# =============================================================================
+
+- name: List existing templates
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/templates"
+    headers: "{{ _sem_auth }}"
+  register: _sem_templates
+
+- name: Create task templates
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/templates"
+    method: POST
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      project_id: "{{ _sem_project_id | int }}"
+      playbook: "{{ item.playbook }}"
+      inventory_id: "{{ _sem_inv_map[item.inventory] | int }}"
+      repository_id: "{{ _sem_repo_id | int }}"
+      environment_id: "{{ _sem_env_map[item.environment | default(semaphore_env_name)] | int }}"
+      description: "{{ item.description | default('') }}"
+      type: ""
+      arguments: "{{ item.arguments | default('[]') }}"
+      allow_override_args_in_task: true
+      view_id: "{{ _sem_view_map[item.view] | default(omit) }}"
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 201, 204]
+  loop: "{{ semaphore_task_templates }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _sem_templates.json | selectattr('name', 'equalto', item.name) | list | length == 0
+
+# =============================================================================
+# Cleanup & Summary
+# =============================================================================
+
+- name: Expire configuration API token
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/user/tokens/{{ _sem_token_result.json.id }}"
+    method: DELETE
+    headers: "{{ _sem_auth }}"
+    status_code: [204, 200]
+  failed_when: false
+
+- name: Display configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "Semaphore project '{{ semaphore_project_name }}' configured!"
+      - "============================================================"
+      - ""
+      - "Project ID: {{ _sem_project_id }}"
+      - "Repository: {{ semaphore_repo_url }} ({{ semaphore_repo_branch }})"
+      - "Inventories: {{ semaphore_inventories | map(attribute='name') | list | join(', ') }}"
+      - ""
+      - "Task templates:"
+      - "{{ semaphore_task_templates | map(attribute='name') | list | to_nice_yaml }}"
+      - "Dashboard: {{ semaphore_external_url }}"
+      - ""
+      - "Required Infisical secrets at {{ semaphore_infisical_path }}:"
+      - "  - SEMAPHORE_ADMIN_PASSWORD  (exists)"
+      - "  - SEMAPHORE_ACCESS_KEY_ENCRYPTION  (exists)"
+      - "  - SEMAPHORE_SSH_PRIVATE_KEY  ({{ 'configured' if _semaphore_ssh_private_key | length > 0 else 'MISSING - add to Infisical' }})"
+      - "  - SEMAPHORE_GIT_TOKEN  ({{ 'configured' if _semaphore_git_token | length > 0 else 'MISSING - add GitHub PAT to Infisical' }})"
+      - "============================================================"

@@ -50,3 +50,58 @@ semaphore_infisical_env: "{{ infisical_env_slug }}"
 # Backup configuration
 semaphore_backup_enabled: true
 semaphore_stop_during_backup: true
+
+# =============================================================================
+# Project Configuration (API-driven setup after deployment)
+# =============================================================================
+semaphore_configure: true
+
+# Project
+semaphore_project_name: "Homelab"
+
+# Git repository Semaphore will clone to run playbooks
+semaphore_repo_name: "homelab"
+semaphore_repo_url: "https://github.com/LuckyPrayer/homelab.git"
+semaphore_repo_branch: "main"
+
+# Access key names
+semaphore_ssh_key_name: "ansible-ssh"
+semaphore_git_key_name: "git-https"
+semaphore_ssh_user: "luckyprayer"
+
+# Git authentication type: "login_password" (HTTPS token) or "ssh"
+semaphore_git_key_type: "login_password"
+
+# Inventory definitions (file-based, paths relative to repo root)
+semaphore_inventories:
+  - name: "dev"
+    inventory_path: "inventories/dev/hosts.yml"
+  - name: "prod"
+    inventory_path: "inventories/prod/hosts.yml"
+
+# Environment configuration for Semaphore task runs
+semaphore_env_name: "default"
+semaphore_env_vars: {}
+
+# Views for organising templates in the Semaphore dashboard
+semaphore_views:
+  - "App Deployments"
+  - "Infrastructure"
+
+# Task templates - defines playbooks that Semaphore can run
+# Each template maps to a host-targeted app deployment
+semaphore_task_templates:
+  - name: "Deploy Apps - All Hosts"
+    playbook: "playbooks/semaphore/deploy-apps.yml"
+    inventory: "{{ env }}"
+    description: "Deploy all homelab apps to all application hosts"
+    view: "App Deployments"
+  - name: "Deploy Apps - orion-{{ env }}"
+    playbook: "playbooks/semaphore/deploy-apps.yml"
+    inventory: "{{ env }}"
+    arguments: '["--limit", "orion-{{ env }}"]'
+    description: "Deploy homelab apps to orion-{{ env }}"
+    view: "App Deployments"
+
+# Whether deploy-all should orchestrate apps via Semaphore instead of directly
+semaphore_orchestrate_apps: false
