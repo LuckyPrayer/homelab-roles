@@ -17,6 +17,18 @@ http:
         stsPreload: true
         stsSeconds: 31536000
 
+    # Security headers (allow framing from same origin)
+    # Used for backends that embed content in iframes (e.g. Home Assistant ingress)
+    security-headers-allow-frames:
+      headers:
+        customFrameOptionsValue: "SAMEORIGIN"
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+
   # Routers
   routers:
     # HTTP to HTTPS redirect
@@ -37,7 +49,11 @@ http:
         - websecure
       service: {{ backend.name }}-backend
       middlewares:
+{% if backend.allow_frames | default(false) %}
+        - security-headers-allow-frames
+{% else %}
         - security-headers
+{% endif %}
       tls:
 {% if traefik_proxy_use_dns_challenge %}
         certResolver: {{ traefik_proxy_cert_resolver }}
