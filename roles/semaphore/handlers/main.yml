@@ -1,0 +1,14 @@
+---
+# Semaphore Role Handlers
+
+- name: Restart Semaphore
+  ansible.builtin.command:
+    cmd: docker compose restart
+    chdir: "{{ semaphore_base_dir }}"
+  become: true
+
+- name: Recreate Semaphore
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate
+    chdir: "{{ semaphore_base_dir }}"
+  become: true

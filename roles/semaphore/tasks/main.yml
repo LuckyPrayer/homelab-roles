@@ -1,0 +1,193 @@
+---
+# Semaphore Role Tasks - Deploy Ansible Semaphore as a Docker container
+#
+# Ansible Semaphore is a modern UI for Ansible that lets you run playbooks,
+# manage inventories, and track deployment history through a web interface.
+
+- name: Check if Semaphore is enabled for this host
+  ansible.builtin.debug:
+    msg: "Semaphore deployment {{ 'enabled' if semaphore_enabled | default(false) else 'skipped' }} for {{ inventory_hostname }}"
+
+- name: Skip Semaphore deployment if not enabled
+  ansible.builtin.meta: end_host
+  when: not (semaphore_enabled | default(false))
+
+# ============================================================================
+# Step 1: Fetch secrets from Infisical (delegated to localhost)
+# ============================================================================
+
+- name: Fetch per-app Infisical token for Semaphore
+  ansible.builtin.shell: |
+    infisical secrets get SEMAPHORE_INFISICAL_TOKEN \
+      --path=/infrastructure/tokens \
+      --env={{ infisical_env_slug }} \
+      --projectId={{ infisical_project_id }} \
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ lookup('env', 'INFISICAL_TOKEN') }}"
+  register: semaphore_per_app_token_result
+  changed_when: false
+  no_log: true
+  delegate_to: localhost
+  become: false
+  failed_when: false
+
+- name: Set Infisical token to use
+  ansible.builtin.set_fact:
+    semaphore_infisical_token: "{{ semaphore_per_app_token_result.stdout if (semaphore_per_app_token_result.rc == 0 and semaphore_per_app_token_result.stdout | length > 0) else lookup('env', 'INFISICAL_TOKEN') }}"
+  no_log: true
+
+- name: Fetch Semaphore admin password from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get SEMAPHORE_ADMIN_PASSWORD \
+      --path={{ semaphore_infisical_path }} \
+      --env={{ infisical_env_slug }} \
+      --projectId={{ infisical_project_id }} \
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ semaphore_infisical_token }}"
+  register: semaphore_admin_password_result
+  changed_when: false
+  no_log: true
+  delegate_to: localhost
+  become: false
+
+- name: Fetch Semaphore access key encryption from Infisical
+  ansible.builtin.shell: |
+    infisical secrets get SEMAPHORE_ACCESS_KEY_ENCRYPTION \
+      --path={{ semaphore_infisical_path }} \
+      --env={{ infisical_env_slug }} \
+      --projectId={{ infisical_project_id }} \
+      --plain --silent
+  environment:
+    INFISICAL_TOKEN: "{{ semaphore_infisical_token }}"
+  register: semaphore_access_key_result
+  changed_when: false
+  no_log: true
+  delegate_to: localhost
+  become: false
+
+- name: Set Semaphore secret facts
+  ansible.builtin.set_fact:
+    semaphore_admin_password: "{{ semaphore_admin_password_result.stdout }}"
+    semaphore_access_key_encryption: "{{ semaphore_access_key_result.stdout }}"
+  no_log: true
+
+# ============================================================================
+# Step 2: Prepare directories
+# ============================================================================
+
+- name: Ensure Semaphore base directory exists
+  ansible.builtin.file:
+    path: "{{ semaphore_base_dir }}"
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Ensure Semaphore data directory exists
+  ansible.builtin.file:
+    path: "{{ semaphore_data_dir }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ semaphore_uid }}"
+    group: "{{ semaphore_gid }}"
+  become: true
+
+# ============================================================================
+# Step 3: Template docker-compose file
+# ============================================================================
+
+- name: Template Semaphore docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ semaphore_base_dir }}/docker-compose.yml"
+    mode: '0644'
+  become: true
+  register: semaphore_compose_config
+
+# ============================================================================
+# Step 4: Template environment file
+# ============================================================================
+
+- name: Template Semaphore environment file
+  ansible.builtin.template:
+    src: semaphore.env.j2
+    dest: "{{ semaphore_base_dir }}/.env"
+    mode: '0600'
+    owner: "{{ semaphore_uid }}"
+    group: "{{ semaphore_gid }}"
+  become: true
+  no_log: true
+  register: semaphore_env_config
+
+# ============================================================================
+# Step 5: Pull image and start container
+# ============================================================================
+
+- name: Pull Semaphore Docker image
+  ansible.builtin.command:
+    cmd: docker pull {{ semaphore_image }}
+  register: semaphore_pull_result
+  changed_when: "'Downloaded newer image' in semaphore_pull_result.stdout or 'Pull complete' in semaphore_pull_result.stdout"
+
+- name: Start Semaphore container
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ semaphore_base_dir }}"
+  become: true
+  register: semaphore_start_result
+  changed_when: "'Started' in semaphore_start_result.stderr | default('') or 'Created' in semaphore_start_result.stderr | default('')"
+
+- name: Force recreate Semaphore if configuration changed
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate
+    chdir: "{{ semaphore_base_dir }}"
+  become: true
+  when: semaphore_compose_config.changed or semaphore_env_config.changed
+  changed_when: true
+
+# ============================================================================
+# Step 6: Wait for Semaphore to be healthy
+# ============================================================================
+
+- name: Wait for Semaphore to be healthy
+  ansible.builtin.uri:
+    url: "http://localhost:{{ semaphore_port }}/api/ping"
+    method: GET
+    status_code: 200
+  register: semaphore_health
+  until: semaphore_health.status == 200
+  retries: 30
+  delay: 5
+  changed_when: false
+
+# ============================================================================
+# Step 7: Display deployment information
+# ============================================================================
+
+- name: Display Semaphore access information
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "Semaphore {{ semaphore_version }} is deployed and running!"
+      - "============================================================"
+      - ""
+      - "Access URLs:"
+      - "  External: {{ semaphore_external_url }}"
+      - "  Direct:   http://{{ ansible_host }}:{{ semaphore_port }}"
+      - ""
+      - "Default credentials:"
+      - "  Username: {{ semaphore_admin_user }}"
+      - "  Password: Check Infisical at {{ semaphore_infisical_path }}/SEMAPHORE_ADMIN_PASSWORD"
+      - ""
+      - "Installation location:"
+      - "  Base dir: {{ semaphore_base_dir }}"
+      - "  Data dir: {{ semaphore_data_dir }}"
+      - ""
+      - "Management commands (run on {{ ansible_host }}):"
+      - "  cd {{ semaphore_base_dir }}"
+      - "  docker compose ps       # View container status"
+      - "  docker compose logs -f  # View logs"
+      - "  docker compose restart  # Restart Semaphore"
+      - ""
+      - "============================================================"

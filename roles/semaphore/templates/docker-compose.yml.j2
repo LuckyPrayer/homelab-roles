@@ -1,0 +1,36 @@
+services:
+  semaphore:
+    image: {{ semaphore_image }}
+    container_name: {{ semaphore_container_name }}
+    env_file:
+      - .env
+{% if semaphore_traefik_enabled %}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.semaphore.rule=Host(`{{ semaphore_hostname }}`)"
+      - "traefik.http.routers.semaphore.entrypoints=websecure"
+      - "traefik.http.routers.semaphore.tls.certresolver={{ semaphore_traefik_certresolver }}"
+      - "traefik.http.services.semaphore.loadbalancer.server.port={{ semaphore_container_port }}"
+{% endif %}
+    ports:
+      - "{{ semaphore_port }}:{{ semaphore_container_port }}"
+    volumes:
+      - {{ semaphore_data_dir }}:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:{{ semaphore_container_port }}/api/ping"]
+      interval: {{ semaphore_healthcheck_interval }}
+      timeout: {{ semaphore_healthcheck_timeout }}
+      retries: {{ semaphore_healthcheck_retries }}
+      start_period: {{ semaphore_healthcheck_start_period }}
+    restart: unless-stopped
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    name: homelab
+    external: true

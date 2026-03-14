@@ -1,0 +1,52 @@
+---
+# Semaphore Role Default Variables
+
+# Enable/disable Semaphore deployment
+semaphore_enabled: true
+
+# Semaphore version
+semaphore_version: "v2.10.22"
+semaphore_image: "semaphoreui/semaphore:{{ semaphore_version }}"
+
+# Directory configuration
+semaphore_base_dir: /opt/infrastructure/semaphore
+semaphore_data_dir: "{{ semaphore_base_dir }}/data"
+
+# Network configuration
+semaphore_port: 3100                    # Host-mapped port
+semaphore_container_port: 3000          # Internal container port
+semaphore_container_name: semaphore
+semaphore_hostname: "semaphore.{{ env }}.{{ base_domain }}"
+semaphore_external_url: "https://{{ semaphore_hostname }}"
+
+# Database configuration (BoltDB - file-based, no external DB required)
+semaphore_db_dialect: bolt
+semaphore_db_path: /data/database.boltdb
+
+# Admin user configuration
+semaphore_admin_user: admin
+semaphore_admin_name: Admin
+semaphore_admin_email: "admin@{{ base_domain }}"
+
+# Container user for data directory ownership
+# Semaphore runs as uid=1001(semaphore) gid=0(root) inside the container
+semaphore_uid: 1001
+semaphore_gid: 0
+
+# Traefik integration
+semaphore_traefik_enabled: true
+semaphore_traefik_certresolver: "mytls"
+
+# Health check configuration
+semaphore_healthcheck_interval: 30s
+semaphore_healthcheck_timeout: 5s
+semaphore_healthcheck_retries: 5
+semaphore_healthcheck_start_period: 15s
+
+# Infisical configuration for Semaphore secrets
+semaphore_infisical_path: "/services/semaphore"
+semaphore_infisical_env: "{{ infisical_env_slug }}"
+
+# Backup configuration
+semaphore_backup_enabled: true
+semaphore_stop_during_backup: true
