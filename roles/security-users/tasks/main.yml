@@ -312,6 +312,19 @@
     - service_users | selectattr('name', 'equalto', 'n8nuser') | list | length > 0
   become: true
 
+- name: Configure sudoers for Semaphore automation user
+  ansible.builtin.template:
+    src: sudoers-semaphore-svc.j2
+    dest: "{{ sudoers_dir }}/semaphore-svc"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  when:
+    - configure_sudoers | bool
+    - service_users | selectattr('name', 'equalto', 'semaphore-svc') | list | length > 0
+  become: true
+
 - name: Configure SSH security settings
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config

@@ -36,6 +36,15 @@ service_users:
     comment: "n8n Automation User"
     ssh_key_infisical_path: "/users/n8n"
 
+  - name: semaphore-svc
+    uid: 3005
+    system: true
+    home: /var/lib/semaphore-svc
+    shell: /bin/bash
+    groups: [docker, sudo]
+    comment: "Semaphore Automation Service Account"
+    ssh_key_infisical_path: "/services/semaphore"
+
 # Ansible user configuration (non-root SSH user)
 create_ansible_user: true
 custom_ansible_user_name: ansible

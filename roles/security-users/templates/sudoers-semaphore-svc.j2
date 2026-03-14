@@ -1,0 +1,60 @@
+# Sudoers configuration for semaphore-svc
+# Provides privileges needed for Semaphore to run Ansible playbooks
+# on managed hosts with become: true
+
+Defaults:semaphore-svc !requiretty
+Defaults:semaphore-svc env_keep += "SSH_AUTH_SOCK"
+
+# System management
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/systemctl start *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/systemctl stop *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/systemctl restart *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/systemctl enable *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/systemctl disable *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/systemctl status *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/systemctl reload *
+
+# Package management
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/apt update
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/apt upgrade *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/apt install *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/apt remove *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/apt autoremove *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/apt-get update
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/apt-get upgrade *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/apt-get install *
+
+# Docker management
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/docker *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/docker compose *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/docker-compose *
+
+# File operations (needed for Ansible file module with become)
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/chmod *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/chown *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/mkdir *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/rm *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/cp *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/mv *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/touch *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/tee *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/ln *
+
+# Network configuration
+semaphore-svc ALL=(root) NOPASSWD: /usr/sbin/ufw *
+semaphore-svc ALL=(root) NOPASSWD: /usr/sbin/iptables *
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/ip *
+
+# User and group management
+semaphore-svc ALL=(root) NOPASSWD: /usr/sbin/useradd *
+semaphore-svc ALL=(root) NOPASSWD: /usr/sbin/usermod *
+semaphore-svc ALL=(root) NOPASSWD: /usr/sbin/groupadd *
+semaphore-svc ALL=(root) NOPASSWD: /usr/sbin/groupmod *
+
+# Service configuration files
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/*
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/tee /etc/docker/*
+
+# Infisical CLI (for secret fetching during playbook runs)
+semaphore-svc ALL=(root) NOPASSWD: /usr/bin/infisical *

@@ -67,7 +67,7 @@ semaphore_repo_branch: "main"
 # Access key names
 semaphore_ssh_key_name: "ansible-ssh"
 semaphore_git_key_name: "git-https"
-semaphore_ssh_user: "luckyprayer"
+semaphore_ssh_user: "semaphore-svc"
 
 # Git authentication type: "login_password" (HTTPS token) or "ssh"
 semaphore_git_key_type: "login_password"
