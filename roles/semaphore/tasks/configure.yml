@@ -19,7 +19,7 @@
 
 - name: Fetch SSH private key from Infisical
   ansible.builtin.shell: |
-    infisical secrets get SEMAPHORE_SSH_PRIVATE_KEY \
+    infisical secrets get SSH_PRIVATE_KEY \
       --path={{ semaphore_infisical_path }} \
       --env={{ infisical_env_slug }} \
       --projectId={{ infisical_project_id }} \
@@ -417,6 +417,7 @@
       - "Required Infisical secrets at {{ semaphore_infisical_path }}:"
       - "  - SEMAPHORE_ADMIN_PASSWORD  (exists)"
       - "  - SEMAPHORE_ACCESS_KEY_ENCRYPTION  (exists)"
-      - "  - SEMAPHORE_SSH_PRIVATE_KEY  ({{ 'configured' if _semaphore_ssh_private_key | length > 0 else 'MISSING - add to Infisical' }})"
+      - "  - SSH_PRIVATE_KEY  ({{ 'configured' if _semaphore_ssh_private_key | length > 0 else 'MISSING - add to Infisical' }})"
+      - "  - SSH_PUBLIC_KEY  (used by security-users role on target hosts)"
       - "  - SEMAPHORE_GIT_TOKEN  ({{ 'configured' if _semaphore_git_token | length > 0 else 'MISSING - add GitHub PAT to Infisical' }})"
       - "============================================================"
