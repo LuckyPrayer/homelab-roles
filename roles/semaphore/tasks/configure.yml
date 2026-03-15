@@ -51,7 +51,7 @@
 
 - name: Set configuration secret facts
   ansible.builtin.set_fact:
-    _semaphore_ssh_private_key: "{{ _sem_ssh_key_result.stdout | default('') }}"
+    _semaphore_ssh_private_key: "{{ _sem_ssh_key_result.stdout | default('') | regex_replace('\\n', '\n') }}"
     _semaphore_git_token: "{{ _sem_git_token_result.stdout | default('') }}"
   no_log: true
 
@@ -113,9 +113,11 @@
     url: "{{ _sem_api }}/projects"
     method: POST
     body_format: json
-    body:
-      name: "{{ semaphore_project_name }}"
-      alert: false
+    body: >-
+      {{ {
+        "name": semaphore_project_name,
+        "alert": false
+      } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201]
   register: _sem_project_new
@@ -143,13 +145,17 @@
     url: "{{ _sem_api }}/project/{{ _sem_project_id }}/keys"
     method: POST
     body_format: json
-    body:
-      name: "{{ semaphore_ssh_key_name }}"
-      type: ssh
-      project_id: "{{ _sem_project_id | int }}"
-      ssh:
-        private_key: "{{ _semaphore_ssh_private_key }}"
-        login: "{{ semaphore_ssh_user }}"
+    body: >-
+      {{ {
+        "name": semaphore_ssh_key_name,
+        "type": "ssh",
+        "project_id": _sem_project_id | int,
+        "ssh": {
+          "private_key": _semaphore_ssh_private_key,
+          "login": semaphore_ssh_user,
+          "passphrase": ""
+        }
+      } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201, 204]
   when:
@@ -162,26 +168,31 @@
     url: "{{ _sem_api }}/project/{{ _sem_project_id }}/keys"
     method: POST
     body_format: json
-    body:
-      name: "none"
-      type: none
-      project_id: "{{ _sem_project_id | int }}"
+    body: >-
+      {{ {
+        "name": "none",
+        "type": "none",
+        "project_id": _sem_project_id | int
+      } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201, 204]
-  when: _sem_keys.json | selectattr('name', 'equalto', 'none') | list | length == 0
+  when: _sem_keys.json | selectattr('name', 'in', ['none', 'None']) | list | length == 0
 
 - name: Add Git HTTPS key
   ansible.builtin.uri:
     url: "{{ _sem_api }}/project/{{ _sem_project_id }}/keys"
     method: POST
     body_format: json
-    body:
-      name: "{{ semaphore_git_key_name }}"
-      type: login_password
-      project_id: "{{ _sem_project_id | int }}"
-      login_password:
-        login: ""
-        password: "{{ _semaphore_git_token }}"
+    body: >-
+      {{ {
+        "name": semaphore_git_key_name,
+        "type": "login_password",
+        "project_id": _sem_project_id | int,
+        "login_password": {
+          "login": "",
+          "password": _semaphore_git_token
+        }
+      } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201, 204]
   when:
@@ -198,7 +209,7 @@
 
 - name: Build key name-to-ID map
   ansible.builtin.set_fact:
-    _sem_key_map: "{{ _sem_key_map | default({}) | combine({item.name: item.id}) }}"
+    _sem_key_map: "{{ _sem_key_map | default({}) | combine({item.name: item.id, item.name | lower: item.id}) }}"
   loop: "{{ _sem_keys.json }}"
   loop_control:
     label: "{{ item.name }}"
@@ -218,12 +229,14 @@
     url: "{{ _sem_api }}/project/{{ _sem_project_id }}/repositories"
     method: POST
     body_format: json
-    body:
-      name: "{{ semaphore_repo_name }}"
-      project_id: "{{ _sem_project_id | int }}"
-      git_url: "{{ semaphore_repo_url }}"
-      git_branch: "{{ semaphore_repo_branch }}"
-      ssh_key_id: "{{ _sem_key_map[semaphore_git_key_name] | default(_sem_key_map['none']) }}"
+    body: >-
+      {{ {
+        "name": semaphore_repo_name,
+        "project_id": _sem_project_id | int,
+        "git_url": semaphore_repo_url,
+        "git_branch": semaphore_repo_branch,
+        "ssh_key_id": _sem_key_map[semaphore_git_key_name] | default(_sem_key_map['none']) | int
+      } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201, 204]
   register: _sem_repo_new
@@ -254,13 +267,15 @@
     url: "{{ _sem_api }}/project/{{ _sem_project_id }}/inventory"
     method: POST
     body_format: json
-    body:
-      name: "{{ item.name }}"
-      project_id: "{{ _sem_project_id | int }}"
-      type: file
-      inventory: "{{ item.inventory_path }}"
-      ssh_key_id: "{{ _sem_key_map[semaphore_ssh_key_name] | default(_sem_key_map['none']) }}"
-      become_key_id: "{{ _sem_key_map[semaphore_ssh_key_name] | default(_sem_key_map['none']) }}"
+    body: >-
+      {{ {
+        "name": item.name,
+        "project_id": _sem_project_id | int,
+        "type": "file",
+        "inventory": item.inventory_path,
+        "ssh_key_id": _sem_key_map[semaphore_ssh_key_name] | default(_sem_key_map['none']) | int,
+        "become_key_id": _sem_key_map[semaphore_ssh_key_name] | default(_sem_key_map['none']) | int
+      } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201, 204]
   loop: "{{ semaphore_inventories }}"
@@ -296,10 +311,12 @@
     url: "{{ _sem_api }}/project/{{ _sem_project_id }}/environment"
     method: POST
     body_format: json
-    body:
-      name: "{{ semaphore_env_name }}"
-      project_id: "{{ _sem_project_id | int }}"
-      json: "{{ semaphore_env_vars | to_json }}"
+    body: >-
+      {{ {
+        "name": semaphore_env_name,
+        "project_id": _sem_project_id | int,
+        "json": semaphore_env_vars | to_json
+      } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201, 204]
   when: _sem_envs.json | selectattr('name', 'equalto', semaphore_env_name) | list | length == 0
@@ -332,9 +349,11 @@
     url: "{{ _sem_api }}/project/{{ _sem_project_id }}/views"
     method: POST
     body_format: json
-    body:
-      title: "{{ item }}"
-      project_id: "{{ _sem_project_id | int }}"
+    body: >-
+      {{ {
+        "title": item,
+        "project_id": _sem_project_id | int
+      } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201, 204]
   loop: "{{ semaphore_views }}"
@@ -368,18 +387,20 @@
     url: "{{ _sem_api }}/project/{{ _sem_project_id }}/templates"
     method: POST
     body_format: json
-    body:
-      name: "{{ item.name }}"
-      project_id: "{{ _sem_project_id | int }}"
-      playbook: "{{ item.playbook }}"
-      inventory_id: "{{ _sem_inv_map[item.inventory] | int }}"
-      repository_id: "{{ _sem_repo_id | int }}"
-      environment_id: "{{ _sem_env_map[item.environment | default(semaphore_env_name)] | int }}"
-      description: "{{ item.description | default('') }}"
-      type: ""
-      arguments: "{{ item.arguments | default('[]') }}"
-      allow_override_args_in_task: true
-      view_id: "{{ _sem_view_map[item.view] | default(omit) }}"
+    body: >-
+      {{ {
+        "name": item.name,
+        "project_id": _sem_project_id | int,
+        "playbook": item.playbook,
+        "inventory_id": _sem_inv_map[item.inventory] | int,
+        "repository_id": _sem_repo_id | int,
+        "environment_id": _sem_env_map[item.environment | default(semaphore_env_name)] | int,
+        "description": item.description | default(''),
+        "app": "ansible",
+        "arguments": item.arguments | default([]) | to_json,
+        "allow_override_args_in_task": true,
+        "view_id": _sem_view_map[item.view] | default(none)
+      } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201, 204]
   loop: "{{ semaphore_task_templates }}"

@@ -99,7 +99,9 @@ semaphore_task_templates:
   - name: "Deploy Apps - orion-{{ env }}"
     playbook: "playbooks/semaphore/deploy-apps.yml"
     inventory: "{{ env }}"
-    arguments: '["--limit", "orion-{{ env }}"]'
+    arguments:
+      - "--limit"
+      - "orion-{{ env }}"
     description: "Deploy homelab apps to orion-{{ env }}"
     view: "App Deployments"
 
