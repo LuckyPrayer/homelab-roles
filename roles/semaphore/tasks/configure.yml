@@ -56,6 +56,36 @@
   no_log: true
 
 # =============================================================================
+# Git credential setup (for private submodule cloning)
+# =============================================================================
+# Semaphore's built-in GIT_ASKPASS handles the main repo clone but fails for
+# private submodules. We set up a persistent credential store in the data
+# directory so all github.com URLs authenticate with the PAT.
+
+- name: Create git credential store for submodule access
+  ansible.builtin.copy:
+    content: "https://{{ semaphore_git_username | default('x-access-token') }}:{{ _semaphore_git_token }}@github.com\n"
+    dest: "{{ semaphore_data_dir }}/.git-credentials"
+    mode: '0600'
+    owner: "{{ semaphore_uid }}"
+    group: "{{ semaphore_gid }}"
+  become: true
+  no_log: true
+  when: _semaphore_git_token | length > 0
+
+- name: Create git config for credential helper
+  ansible.builtin.copy:
+    content: |
+      [credential]
+          helper = store --file /data/.git-credentials
+    dest: "{{ semaphore_data_dir }}/.gitconfig"
+    mode: '0644'
+    owner: "{{ semaphore_uid }}"
+    group: "{{ semaphore_gid }}"
+  become: true
+  when: _semaphore_git_token | length > 0
+
+# =============================================================================
 # Authentication
 # =============================================================================
 
@@ -274,7 +304,7 @@
         "type": "file",
         "inventory": item.inventory_path,
         "ssh_key_id": _sem_key_map[semaphore_ssh_key_name] | default(_sem_key_map['none']) | int,
-        "become_key_id": _sem_key_map[semaphore_ssh_key_name] | default(_sem_key_map['none']) | int
+        "become_key_id": _sem_key_map['none'] | int
       } }}
     headers: "{{ _sem_auth }}"
     status_code: [200, 201, 204]
@@ -282,6 +312,20 @@
   loop_control:
     label: "{{ item.name }}"
   when: _sem_inventories.json | selectattr('name', 'equalto', item.name) | list | length == 0
+
+- name: Fix inventory become_key_id (must be none or login_password type)
+  ansible.builtin.uri:
+    url: "{{ _sem_api }}/project/{{ _sem_project_id }}/inventory/{{ item.id }}"
+    method: PUT
+    body_format: json
+    body: >-
+      {{ item | combine({"become_key_id": _sem_key_map['none'] | int}) }}
+    headers: "{{ _sem_auth }}"
+    status_code: [200, 204]
+  loop: "{{ _sem_inventories.json }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.become_key_id != (_sem_key_map['none'] | int)
 
 - name: Refresh inventory list
   ansible.builtin.uri:
